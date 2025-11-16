@@ -1,0 +1,428 @@
+index;subindex;description;type;access;rxPDO;txPDO
+0x1000;0x0;Device Type;UNSIGNED32;RO;0;0
+0x1001;0x0;Error Register;UNSIGNED8;RO;0;0
+0x1003;0x0;Number of Errors;UNSIGNED8;RW;0;0
+0x1003;0x1;Error History (1);UNSIGNED32;RO;0;0
+0x1003;0x2;Error History (2);UNSIGNED32;RO;0;0
+0x1003;0x3;Error History (3);UNSIGNED32;RO;0;0
+0x1003;0x4;Error History (4);UNSIGNED32;RO;0;0
+0x1003;0x5;Error History (5);UNSIGNED32;RO;0;0
+0x1005;0x0;COB-ID SYNC;UNSIGNED32;RW;0;0
+0x1008;0x0;Manufacturer Device Name;STRING8;CONST;0;0
+0x100C;0x0;Guard Time;UNSIGNED16;RW;0;0
+0x100D;0x0;Lifetime Factor;UNSIGNED8;RW;0;0
+0x1010;0x0;Internal Largest SubIndex Supported;UNSIGNED8;RO;0;0
+0x1010;0x1;Save All Parameters;UNSIGNED32;RW;0;0
+0x1011;0x0;Internal Largest SubIndex Supported (2);UNSIGNED8;RO;0;0
+0x1011;0x1;Restore All Default Parameters;UNSIGNED32;RW;0;0
+0x1011;0x5;Restore Default PDO COB-IDs;UNSIGNED32;RW;0;0
+0x1012;0x0;COB-ID Time Stamp Object;UNSIGNED32;RW;0;0
+0x1013;0x0;High Resolution Time Stamp;UNSIGNED32;RW;0;0
+0x1014;0x0;COB-ID EMCY;UNSIGNED32;RW;0;0
+0x1016;0x0;Internal Number of Entries;UNSIGNED8;RO;0;0
+0x1016;0x1;Consumer 1 Heartbeat Time;UNSIGNED32;RW;0;0
+0x1016;0x2;Consumer 2 Heartbeat Time;UNSIGNED32;RW;0;0
+0x1017;0x0;Producer Heartbeat Time;UNSIGNED16;RW;0;0
+0x1018;0x0;Internal Number of Entries (2);UNSIGNED8;RO;0;0
+0x1018;0x1;Vendor ID;UNSIGNED32;RO;0;0
+0x1018;0x2;Product Code;UNSIGNED32;RO;0;0
+0x1018;0x3;Revision Number;UNSIGNED32;RO;0;0
+0x1018;0x4;Serial Number;UNSIGNED32;RO;0;0
+0x1020;0x0;Internal Number of Entries (3);UNSIGNED8;RO;0;0
+0x1020;0x1;Configuration Date;UNSIGNED32;RW;0;0
+0x1020;0x2;Configuration Time;UNSIGNED32;RW;0;0
+0x1200;0x0;Internal Number of Entries (4);UNSIGNED8;RO;0;0
+0x1200;0x1;SDO COB-ID Client->Server (rx);UNSIGNED32;RO;0;0
+0x1200;0x2;SDO COB-ID Server->Client (tx);UNSIGNED32;RO;0;0
+0x1400;0x0;Internal Largest SubIndex Supported in RxPDO 1;UNSIGNED8;RO;0;0
+0x1400;0x1;COB-ID used by RxPDO 1;UNSIGNED32;RW;0;0
+0x1400;0x2;Transmission Type in RxPDO 1;UNSIGNED8;RW;0;0
+0x1401;0x0;Internal Largest SubIndex Supported in RxPDO 2;UNSIGNED8;RO;0;0
+0x1401;0x1;COB-ID used by RxPDO 2;UNSIGNED32;RW;0;0
+0x1401;0x2;Transmission Type in RxPDO 2;UNSIGNED8;RW;0;0
+0x1402;0x0;Internal Largest SubIndex Supported in RxPDO 3;UNSIGNED8;RO;0;0
+0x1402;0x1;COB-ID used by RxPDO 3;UNSIGNED32;RW;0;0
+0x1402;0x2;Transmission Type in RxPDO 3;UNSIGNED8;RW;0;0
+0x1403;0x0;Internal Largest SubIndex Supported in RxPDO 4;UNSIGNED8;RO;0;0
+0x1403;0x1;COB-ID used by RxPDO 4;UNSIGNED32;RW;0;0
+0x1403;0x2;Transmission Type in RxPDO 4;UNSIGNED8;RW;0;0
+0x1600;0x0;Number of Mapped Application Objects in RxPDO 1;UNSIGNED8;RW;0;0
+0x1600;0x1;1st Mapped Object in RxPDO 1;UNSIGNED32;RW;0;0
+0x1600;0x2;2nd Mapped Object in RxPDO 1;UNSIGNED32;RW;0;0
+0x1600;0x3;3rd Mapped Object in RxPDO 1;UNSIGNED32;RW;0;0
+0x1600;0x4;4th Mapped Object in RxPDO 1;UNSIGNED32;RW;0;0
+0x1600;0x5;5th Mapped Object in RxPDO 1;UNSIGNED32;RW;0;0
+0x1600;0x6;6th Mapped Object in RxPDO 1;UNSIGNED32;RW;0;0
+0x1600;0x7;7th Mapped Object in RxPDO 1;UNSIGNED32;RW;0;0
+0x1600;0x8;8th Mapped Object in RxPDO 1;UNSIGNED32;RW;0;0
+0x1601;0x0;Number of Mapped Application Objects in RxPDO 2;UNSIGNED8;RW;0;0
+0x1601;0x1;1st Mapped Object in RxPDO 2;UNSIGNED32;RW;0;0
+0x1601;0x2;2nd Mapped Object in RxPDO 2;UNSIGNED32;RW;0;0
+0x1601;0x3;3rd Mapped Object in RxPDO 2;UNSIGNED32;RW;0;0
+0x1601;0x4;4th Mapped Object in RxPDO 2;UNSIGNED32;RW;0;0
+0x1601;0x5;5th Mapped Object in RxPDO 2;UNSIGNED32;RW;0;0
+0x1601;0x6;6th Mapped Object in RxPDO 2;UNSIGNED32;RW;0;0
+0x1601;0x7;7th Mapped Object in RxPDO 2;UNSIGNED32;RW;0;0
+0x1601;0x8;8th Mapped Object in RxPDO 2;UNSIGNED32;RW;0;0
+0x1602;0x0;Number of Mapped Application Objects in RxPDO 3;UNSIGNED8;RW;0;0
+0x1602;0x1;1st Mapped Object in RxPDO 3;UNSIGNED32;RW;0;0
+0x1602;0x2;2nd Mapped Object in RxPDO 3;UNSIGNED32;RW;0;0
+0x1602;0x3;3rd Mapped Object in RxPDO 3;UNSIGNED32;RW;0;0
+0x1602;0x4;4th Mapped Object in RxPDO 3;UNSIGNED32;RW;0;0
+0x1602;0x5;5th Mapped Object in RxPDO 3;UNSIGNED32;RW;0;0
+0x1602;0x6;6th Mapped Object in RxPDO 3;UNSIGNED32;RW;0;0
+0x1602;0x7;7th Mapped Object in RxPDO 3;UNSIGNED32;RW;0;0
+0x1602;0x8;8th Mapped Object in RxPDO 3;UNSIGNED32;RW;0;0
+0x1603;0x0;Number of Mapped Application Objects in RxPDO 4;UNSIGNED8;RW;0;0
+0x1603;0x1;1st Mapped Object in RxPDO 4;UNSIGNED32;RW;0;0
+0x1603;0x2;2nd Mapped Object in RxPDO 4;UNSIGNED32;RW;0;0
+0x1603;0x3;3rd Mapped Object in RxPDO 4;UNSIGNED32;RW;0;0
+0x1603;0x4;4th Mapped Object in RxPDO 4;UNSIGNED32;RW;0;0
+0x1603;0x5;5th Mapped Object in RxPDO 4;UNSIGNED32;RW;0;0
+0x1603;0x6;6th Mapped Object in RxPDO 4;UNSIGNED32;RW;0;0
+0x1603;0x7;7th Mapped Object in RxPDO 4;UNSIGNED32;RW;0;0
+0x1603;0x8;8th Mapped Object in RxPDO 4;UNSIGNED32;RW;0;0
+0x1800;0x0;Internal Largest SubIndex Supported in TxPDO 1;UNSIGNED8;RO;0;0
+0x1800;0x1;COB-ID used by TxPDO 1;UNSIGNED32;RW;0;0
+0x1800;0x2;Transmission Type in TxPDO 1;UNSIGNED8;RW;0;0
+0x1800;0x3;Inhibit Time in TxPDO 1;UNSIGNED16;RW;0;0
+0x1801;0x0;Internal Largest SubIndex Supported in TxPDO 2;UNSIGNED8;RO;0;0
+0x1801;0x1;COB-ID used by TxPDO 2;UNSIGNED32;RW;0;0
+0x1801;0x2;Transmission Type in TxPDO 2;UNSIGNED8;RW;0;0
+0x1801;0x3;Inhibit Time in TxPDO 2;UNSIGNED16;RW;0;0
+0x1802;0x0;Internal Largest SubIndex Supported in TxPDO 3;UNSIGNED8;RO;0;0
+0x1802;0x1;COB-ID used by TxPDO 3;UNSIGNED32;RW;0;0
+0x1802;0x2;Transmission Type in TxPDO 3;UNSIGNED8;RW;0;0
+0x1802;0x3;Inhibit Time in TxPDO 3;UNSIGNED16;RW;0;0
+0x1803;0x0;Internal Largest SubIndex Supported in TxPDO 4;UNSIGNED8;RO;0;0
+0x1803;0x1;COB-ID used by TxPDO 4;UNSIGNED32;RW;0;0
+0x1803;0x2;Transmission Type in TxPDO 4;UNSIGNED8;RW;0;0
+0x1803;0x3;Inhibit Time in TxPDO 4;UNSIGNED16;RW;0;0
+0x1A00;0x0;Number of Mapped Application Objects in TxPDO 1;UNSIGNED8;RW;0;0
+0x1A00;0x1;1st Mapped Object in TxPDO 1;UNSIGNED32;RW;0;0
+0x1A00;0x2;2nd Mapped Object in TxPDO 1;UNSIGNED32;RW;0;0
+0x1A00;0x3;3rd Mapped Object in TxPDO 1;UNSIGNED32;RW;0;0
+0x1A00;0x4;4th Mapped Object in TxPDO 1;UNSIGNED32;RW;0;0
+0x1A00;0x5;5th Mapped Object in TxPDO 1;UNSIGNED32;RW;0;0
+0x1A00;0x6;6th Mapped Object in TxPDO 1;UNSIGNED32;RW;0;0
+0x1A00;0x7;7th Mapped Object in TxPDO 1;UNSIGNED32;RW;0;0
+0x1A00;0x8;8th Mapped Object in TxPDO 1;UNSIGNED32;RW;0;0
+0x1A01;0x0;Number of Mapped Application Objects in TxPDO 2;UNSIGNED8;RW;0;0
+0x1A01;0x1;1st Mapped Object in TxPDO 2;UNSIGNED32;RW;0;0
+0x1A01;0x2;2nd Mapped Object in TxPDO 2;UNSIGNED32;RW;0;0
+0x1A01;0x3;3rd Mapped Object in TxPDO 2;UNSIGNED32;RW;0;0
+0x1A01;0x4;4th Mapped Object in TxPDO 2;UNSIGNED32;RW;0;0
+0x1A01;0x5;5th Mapped Object in TxPDO 2;UNSIGNED32;RW;0;0
+0x1A01;0x6;6th Mapped Object in TxPDO 2;UNSIGNED32;RW;0;0
+0x1A01;0x7;7th Mapped Object in TxPDO 2;UNSIGNED32;RW;0;0
+0x1A01;0x8;8th Mapped Object in TxPDO 2;UNSIGNED32;RW;0;0
+0x1A02;0x0;Number of Mapped Application Objects in TxPDO 3;UNSIGNED8;RW;0;0
+0x1A02;0x1;1st Mapped Object in TxPDO 3;UNSIGNED32;RW;0;0
+0x1A02;0x2;2nd Mapped Object in TxPDO 3;UNSIGNED32;RW;0;0
+0x1A02;0x3;3rd Mapped Object in TxPDO 3;UNSIGNED32;RW;0;0
+0x1A02;0x4;4th Mapped Object in TxPDO 3;UNSIGNED32;RW;0;0
+0x1A02;0x5;5th Mapped Object in TxPDO 3;UNSIGNED32;RW;0;0
+0x1A02;0x6;6th Mapped Object in TxPDO 3;UNSIGNED32;RW;0;0
+0x1A02;0x7;7th Mapped Object in TxPDO 3;UNSIGNED32;RW;0;0
+0x1A02;0x8;8th Mapped Object in TxPDO 3;UNSIGNED32;RW;0;0
+0x1A03;0x0;Number of Mapped Application Objects in TxPDO 4;UNSIGNED8;RW;0;0
+0x1A03;0x1;1st Mapped Object in TxPDO 4;UNSIGNED32;RW;0;0
+0x1A03;0x2;2nd Mapped Object in TxPDO 4;UNSIGNED32;RW;0;0
+0x1A03;0x3;3rd Mapped Object in TxPDO 4;UNSIGNED32;RW;0;0
+0x1A03;0x4;4th Mapped Object in TxPDO 4;UNSIGNED32;RW;0;0
+0x1A03;0x5;5th Mapped Object in TxPDO 4;UNSIGNED32;RW;0;0
+0x1A03;0x6;6th Mapped Object in TxPDO 4;UNSIGNED32;RW;0;0
+0x1A03;0x7;7th Mapped Object in TxPDO 4;UNSIGNED32;RW;0;0
+0x1A03;0x8;8th Mapped Object in TxPDO 4;UNSIGNED32;RW;0;0
+0x2000;0x0;Node ID;UNSIGNED8;RW;0;0
+0x2001;0x0;CAN Bitrate;UNSIGNED16;RW;0;0
+0x2002;0x0;RS232 Baudrate;UNSIGNED16;RW;0;0
+0x2003;0x0;Internal Number of Entries (5);UNSIGNED8;RO;0;0
+0x2003;0x1;Software Version;UNSIGNED16;RO;0;0
+0x2003;0x2;Hardware Version;UNSIGNED16;RO;0;0
+0x2003;0x3;Application Number;UNSIGNED16;RO;0;0
+0x2003;0x4;Application Version;UNSIGNED16;RO;0;0
+0x2003;0x5;Basesector Version;UNSIGNED16;RO;0;0
+0x2004;0x0;Serial Number (2);UNSIGNED64;CONST;0;0
+0x2005;0x0;RS232 Frame Timeout;UNSIGNED16;RW;0;0
+0x2006;0x0;USB Frame Timeout;UNSIGNED16;RW;0;0
+0x2008;0x0;Miscellaneous Configuration;UNSIGNED16;RW;0;0
+0x2009;0x0;Internal Dip Switch State;UNSIGNED16;RO;1;0
+0x200A;0x0;CAN Bitrate Display;UNSIGNED16;RO;0;0
+0x200C;0x0;Internal Number of Entries (6);UNSIGNED8;RO;1;1
+0x200C;0x1;Custom persistent memory 1;UNSIGNED32;RW;0;0
+0x200C;0x2;Custom persistent memory 2;UNSIGNED32;RW;0;0
+0x200C;0x3;Custom persistent memory 3;UNSIGNED32;RW;0;0
+0x200C;0x4;Custom persistent memory4;UNSIGNED32;RW;0;0
+0x2010;0x0;Internal DataRecorder Control;UNSIGNED16;RW;1;1
+0x2011;0x0;Internal DataRecorder Configuration;UNSIGNED16;RW;0;0
+0x2012;0x0;Internal DataRecorder Sampling Period;UNSIGNED16;RW;0;0
+0x2013;0x0;Internal DataRecorder Number of Preceding Samples;UNSIGNED16;RW;0;0
+0x2014;0x0;Internal DataRecorder Number of Sampling Variables;UNSIGNED16;RW;0;0
+0x2015;0x0;Internal Number of Entries (7);UNSIGNED8;RO;1;1
+0x2015;0x1;Internal DataRecorder Index of Variable 1;UNSIGNED16;RW;0;0
+0x2015;0x2;Internal DataRecorder Index of Variable 2;UNSIGNED16;RW;0;0
+0x2015;0x3;Internal DataRecorder Index of Variable 3;UNSIGNED16;RW;0;0
+0x2015;0x4;Internal DataRecorder Index of Variable 4;UNSIGNED16;RW;0;0
+0x2016;0x0;Internal Number of Entries (8);UNSIGNED8;RO;1;1
+0x2016;0x1;Internal DataRecorder SubIndex of Variable 1;UNSIGNED16;RW;0;0
+0x2016;0x2;Internal DataRecorder SubIndex of Variable 2;UNSIGNED16;RW;0;0
+0x2016;0x3;Internal DataRecorder SubIndex of Variable 3;UNSIGNED16;RW;0;0
+0x2016;0x4;Internal DataRecorder SubIndex of Variable 4;UNSIGNED16;RW;0;0
+0x2017;0x0;Internal DataRecorder Status;UNSIGNED16;RO;1;1
+0x2018;0x0;Internal DataRecorder Max Number of Samples;UNSIGNED16;RO;1;1
+0x2019;0x0;Internal DataRecorder Number of Recorded Samples;UNSIGNED16;RO;1;1
+0x201A;0x0;Internal DataRecorder Vector Start Offset;UNSIGNED16;RO;1;1
+0x201B;0x0;Internal DataRecorder Data Buffer;DOMAIN;RW;1;1
+0x2020;0x0;Incremental Encoder 1 Counter;UNSIGNED32;RO;0;1
+0x2021;0x0;Incremental Encoder 1 Counter at Index Pulse;UNSIGNED32;RO;0;1
+0x2022;0x0;Hall Sensor Pattern;UNSIGNED16;RO;0;1
+0x2023;0x0;Internal Object Actual Rotor Angle;UNSIGNED16;RW;1;1
+0x2024;0x0;Internal System State;UNSIGNED16;RO;1;1
+0x2025;0x0;Internal Object Reserved;UNSIGNED32;WO;1;1
+0x2026;0x0;Internal Object Number of Entries;UNSIGNED8;RO;1;1
+0x2026;0x1;Internal Object MemoryAddress;UNSIGNED32;RW;1;1
+0x2026;0x2;Internal Object MemoryValue;UNSIGNED16;RW;1;1
+0x2027;0x0;Current Actual Value Averaged;INTEGER16;RO;0;1
+0x2028;0x0;Velocity Actual Value Averaged;INTEGER32;RO;0;1
+0x2029;0x0;Auxiliary Velocity Actual Value Averaged;INTEGER32;RO;0;1
+0x202C;0x0;Internal Object Number of Entries (2);UNSIGNED8;RO;1;1
+0x202C;0x1;Internal Object Main Position Sensor Resolution;UNSIGNED32;RO;1;0
+0x202C;0x2;Internal Object Maximal Velocity Limit;UNSIGNED32;RO;1;1
+0x202C;0x3;Internal Object Auxiliary Position Sensor Resolution;UNSIGNED32;RO;1;1
+0x202D;0x0;Internal Object Number of Entries (3);UNSIGNED8;RO;1;1
+0x202D;0x1;Internal Object Maximum measured angle difference;INTEGER16;RO;1;0
+0x202D;0x2;Internal Object Minimum measured angle difference;INTEGER16;RO;1;0
+0x202D;0x3;Internal Object Angle difference overflow counter;UNSIGNED16;RO;1;0
+0x202D;0x4;Internal Object Angle Error factor 2 pole motor;UNSIGNED16;RW;0;0
+0x202D;0x5;Internal Object Angle Error factor N pole motor;UNSIGNED16;RW;0;0
+0x202E;0x0;Internal Object Number of Entries (4);UNSIGNED8;RO;0;0
+0x202E;0x1;Internal Object ADC NTC temperature value;UNSIGNED16;RO;1;1
+0x202E;0x2;Internal Object ADC current U (W1);INTEGER16;RO;1;1
+0x202E;0x3;Internal Object ADC current V (W2);INTEGER16;RO;1;1
+0x202E;0x4;Internal Object ADC Input voltage;UNSIGNED16;RO;1;1
+0x202E;0x5;Internal Object ADC Gate driver voltage;UNSIGNED16;RO;1;1
+0x202E;0x6;Internal Object ADC Sine entry Voltage;UNSIGNED16;RO;1;1
+0x202E;0x7;Internal Object ADC Cosine entry Voltage;UNSIGNED16;RO;1;1
+0x202E;0x8;Internal Object ADC CAN-ID Switch 1;UNSIGNED16;RO;1;1
+0x202E;0x9;Internal Object ADC CAN-ID Switch 2;UNSIGNED16;RO;1;1
+0x2030;0x0;Current Mode Setting Value;INTEGER16;RW;1;1
+0x2031;0x0;Current Demand Value;INTEGER16;RO;0;1
+0x2062;0x0;Position Mode Setting Value;INTEGER32;RW;1;1
+0x2069;0x0;Auxiliary Velocity Sensor Actual Value;INTEGER32;RO;0;1
+0x206B;0x0;Velocity Mode Setting Value;INTEGER32;RW;1;1
+0x206C;0x0;Auxiliary Velocity Actual Value;INTEGER32;RO;0;1
+0x2070;0x0;Internal Number of Entries (9);UNSIGNED8;RO;1;1
+0x2070;0x1;Configuration of Digital Input1;UNSIGNED16;RW;0;0
+0x2070;0x2;Configuration of Digital Input2;UNSIGNED16;RW;0;0
+0x2070;0x3;Configuration of Digital Input3;UNSIGNED16;RW;0;0
+0x2070;0x4;Configuration of Digital Input4;UNSIGNED16;RW;0;0
+0x2070;0x5;Configuration of Digital Input5;UNSIGNED16;RW;0;0
+0x2070;0x6;Configuration of Digital Input6;UNSIGNED16;RW;0;0
+0x2070;0x7;Configuration of Digital Input7;UNSIGNED16;RW;0;0
+0x2070;0x8;Configuration of Digital Input8;UNSIGNED16;RW;0;0
+0x2070;0x9;Configuration of Digital Input9;UNSIGNED16;RW;0;0
+0x2071;0x0;Internal Number of Entries (10);UNSIGNED8;RO;1;1
+0x2071;0x1;Digital Input Functionalities State;UNSIGNED16;RO;0;1
+0x2071;0x2;Digital Input Functionalities Mask;UNSIGNED16;RW;0;0
+0x2071;0x3;Digital Input Functionalities Polarity;UNSIGNED16;RW;0;0
+0x2071;0x4;Digital Input Functionalities Execution Mask;UNSIGNED16;RW;0;0
+0x2074;0x0;Internal Number of Entries (11);UNSIGNED8;RO;1;1
+0x2074;0x1;Position Marker Captured Position;INTEGER32;RO;0;1
+0x2074;0x2;Position Marker Edge Type;UNSIGNED8;RW;0;0
+0x2074;0x3;Position Marker Mode;UNSIGNED8;RW;0;0
+0x2074;0x4;Position Marker Counter;UNSIGNED16;RW;1;1
+0x2074;0x5;Position Marker History (1);INTEGER32;RO;1;1
+0x2074;0x6;Position Marker History (2);INTEGER32;RO;1;1
+0x2078;0x0;Internal Number of Entries (12);UNSIGNED8;RO;1;1
+0x2078;0x1;Digital Output State;UNSIGNED16;RW;1;1
+0x2078;0x2;Digital Output Mask;UNSIGNED16;RW;0;0
+0x2078;0x3;Digital Output Polarity;UNSIGNED16;RW;0;0
+0x2079;0x0;Internal Number of Entries (13);UNSIGNED8;RO;1;1
+0x2079;0x1;Configuration of Digital Output1;UNSIGNED16;RW;0;0
+0x2079;0x2;Configuration of Digital Output2;UNSIGNED16;RW;0;0
+0x2079;0x3;Configuration of Digital Output3;UNSIGNED16;RW;0;0
+0x2079;0x4;Configuration of Digital Output4;UNSIGNED16;RW;0;0
+0x2079;0x5;Configuration of Digital Output5;UNSIGNED16;RW;0;0
+0x207A;0x0;Internal Number of Entries (14);UNSIGNED8;RO;1;1
+0x207A;0x1;Position Compare Configuration;UNSIGNED16;RW;1;1
+0x207A;0x2;Position Compare Reference Position;INTEGER32;RW;1;1
+0x207A;0x3;Position Compare Interval Width;INTEGER32;RW;0;0
+0x207A;0x4;Position Compare Interval Repetitions;UNSIGNED16;RW;0;0
+0x207A;0x5;Position Compare Pulse Width;UNSIGNED16;RW;0;0
+0x207B;0x0;Internal Number of Entries (15);UNSIGNED8;RO;1;1
+0x207B;0x1;Configuration of Analog Input1;UNSIGNED16;RW;0;0
+0x207B;0x2;Configuration of Analog Input2;UNSIGNED16;RW;0;0
+0x207C;0x0;Internal Number of Entries (16);UNSIGNED8;RO;1;1
+0x207C;0x1;Analog Input 1;INTEGER16;RO;0;1
+0x207C;0x2;Analog Input 2;INTEGER16;RO;0;1
+0x207D;0x0;Analog Input Functionalities Execution Mask;UNSIGNED16;RW;0;0
+0x207E;0x0;Analog Output 1;UNSIGNED16;RW;1;1
+0x2080;0x0;Current Threshold for Homing Mode;UNSIGNED16;RW;1;1
+0x2081;0x0;Home Position;INTEGER32;RW;1;1
+0x2082;0x0;Home Position Displacement;INTEGER32;RO;1;0
+0x20C1;0x0;Interpolation Data Record;UNSIGNED64;WO;1;0
+0x20C4;0x0;Internal Number of Entries (17);UNSIGNED8;RO;1;1
+0x20C4;0x1;Interpolation Buffer Status;UNSIGNED16;RO;0;1
+0x20C4;0x2;Interpolation Buffer Underflow Warning;UNSIGNED16;RW;0;0
+0x20C4;0x3;Interpolation Buffer Overflow Warning;UNSIGNED16;RW;0;0
+0x20F4;0x0;Following Error Actual Value;INTEGER16;RO;0;1
+0x2100;0x0;Internal Number of Entries (18);UNSIGNED8;RO;1;1
+0x2100;0x1;Brake Reaction Rise Time;UNSIGNED16;RW;0;0
+0x2100;0x2;Brake Reaction Fall Time;UNSIGNED16;RW;0;0
+0x2100;0x3;Brake Timeout;UNSIGNED16;RW;0;0
+0x2101;0x0;Internal Number of Entries (19);UNSIGNED8;RO;1;1
+0x2101;0x1;Standstill Window;UNSIGNED16;RW;0;0
+0x2101;0x2;Standstill Window Time;UNSIGNED16;RW;0;0
+0x2101;0x3;Standstill Timeout;UNSIGNED16;RW;0;0
+0x2210;0x0;Internal Number of Entries (20);UNSIGNED8;RO;1;1
+0x2210;0x1;Pulse Number Incremental Encoder 1;UNSIGNED32;RW;0;0
+0x2210;0x2;Position Sensor Type;UNSIGNED16;RW;0;0
+0x2210;0x3;Internal Absolute Position Offset;UNSIGNED16;RW;0;0
+0x2210;0x4;Position Sensor Polarity;UNSIGNED16;RW;0;0
+0x2211;0x0;Internal Number of Entries (21);UNSIGNED8;RO;1;1
+0x2211;0x1;SSI Encoder Data Rate;UNSIGNED16;RW;0;0
+0x2211;0x2;SSI Encoder Number of Data Bits;UNSIGNED16;RW;0;0
+0x2211;0x3;SSI Encoder Actual Position;INTEGER32;RO;1;1
+0x2211;0x4;SSI Encoder Encoding Type;UNSIGNED16;RW;0;0
+0x2212;0x0;Internal Number of Entries (22);UNSIGNED8;RO;1;1
+0x2212;0x1;Incremental Encoder 2 Pulse Number;UNSIGNED32;RW;0;0
+0x2212;0x2;Incremental Encoder 2 Counter;UNSIGNED32;RO;0;1
+0x2212;0x3;Incremental Encoder 2 Counter at Index Pulse;UNSIGNED32;RO;0;1
+0x2213;0x0;Internal Number of Entries (23);UNSIGNED8;RO;1;1
+0x2213;0x1;Sinus Incremental Encoder 2 Resolution;UNSIGNED32;RW;0;0
+0x2213;0x2;Sinus Incremental Encoder 2 Actual Position;INTEGER32;RO;1;1
+0x2213;0x3;Internal Sinus Incremental Encoder 2 Actual Angle;UNSIGNED16;RO;1;1
+0x2220;0x0;Controller Structure;UNSIGNED16;RW;0;0
+0x2230;0x0;Internal Number of Entries (24);UNSIGNED8;RO;1;1
+0x2230;0x1;Gear Ratio Numerator;UNSIGNED32;RW;0;0
+0x2230;0x2;Gear Ratio Denominator;UNSIGNED16;RW;0;0
+0x2230;0x3;Gear Maximal Speed;UNSIGNED32;RW;0;0
+0x2240;0x0;Internal Number of Entries (25);UNSIGNED8;RO;1;1
+0x2240;0x1;Internal SSI Encoder State;UNSIGNED16;RW;0;0
+0x2240;0x2;Internal SSI Encoder Zero Position Reference;INTEGER32;RO;1;0
+0x2300;0x0;Internal Number of Entries (26);UNSIGNED8;RO;1;1
+0x2300;0x1;Digital Position Desired Value;INTEGER32;RO;1;1
+0x2300;0x2;Digital Position Scaling Numerator;UNSIGNED16;RW;0;0
+0x2300;0x3;Digital Position Scaling Denominator;UNSIGNED16;RW;0;0
+0x2300;0x4;Digital Position Polarity;UNSIGNED8;RW;0;0
+0x2300;0x5;Digital Position Offset;INTEGER32;RW;0;0
+0x2301;0x0;Internal Number of Entries (27);UNSIGNED8;RO;1;1
+0x2301;0x1;Analog Current Setpoint Scaling;INTEGER16;RW;0;0
+0x2301;0x2;Analog Current Setpoint Offset;INTEGER16;RW;0;0
+0x2301;0x3;Analog Current Setpoint Notation Index;INTEGER8;RW;0;0
+0x2301;0x4;Analog Current Setpoint;INTEGER16;RO;1;1
+0x2302;0x0;Internal Number of Entries (28);UNSIGNED8;RO;1;1
+0x2302;0x1;Analog Velocity Setpoint Scaling;INTEGER16;RW;0;0
+0x2302;0x2;Analog Velocity Setpoint Offset;INTEGER32;RW;0;0
+0x2302;0x3;Analog Velocity Setpoint Notation Index;INTEGER8;RW;0;0
+0x2302;0x4;Analog Velocity Setpoint;INTEGER32;RO;1;1
+0x2303;0x0;Internal Number of Entries (29);UNSIGNED8;RO;1;1
+0x2303;0x1;Analog Position Setpoint Scaling;INTEGER16;RW;0;0
+0x2303;0x2;Analog Position Setpoint Offset;INTEGER32;RW;0;0
+0x2303;0x3;Analog Position Setpoint Notation Index;INTEGER8;RW;0;0
+0x2303;0x4;Analog Position Setpoint;INTEGER32;RO;1;1
+0x2400;0x0;Internal Number of Entries (30);UNSIGNED8;RO;1;1
+0x2400;0x1;Internal Cut-off Frequency of Oscillator;UNSIGNED16;RW;1;1
+0x2400;0x2;Internal Target Amplitude of Oscillation;UNSIGNED32;RW;1;1
+0x2400;0x3;Internal Oscillation Control;UNSIGNED16;RW;1;1
+0x2401;0x0;Internal Number of Entries (31);UNSIGNED8;RO;1;1
+0x2401;0x1;Internal Cycle Duration;UNSIGNED32;RO;1;1
+0x2401;0x2;Internal Phase Delay;UNSIGNED32;RO;1;1
+0x2401;0x3;Internal Set Value Ramp Current;UNSIGNED16;RO;1;1
+0x2401;0x4;Internal Actual Position Peak Value;UNSIGNED32;RO;1;1
+0x2401;0x5;Internal Actual Value of Dynamic Friction;UNSIGNED32;RO;1;1
+0x2401;0x6;Internal Number of Oscillation Cycles;UNSIGNED16;RO;1;1
+0x2401;0x7;Internal Maximum Friction Current;UNSIGNED16;RO;1;1
+0x2401;0x8;Internal Actual Position Peak Value Aux;UNSIGNED32;RO;1;1
+0x2401;0x9;Internal Actual Position Peak Value Difference;UNSIGNED32;RO;1;1
+0x2410;0x0;Internal Number of Entries (32);UNSIGNED8;RO;1;1
+0x2410;0x1;Internal LR Identification Control;UNSIGNED16;RW;1;1
+0x2410;0x2;Internal LR Identification Current;UNSIGNED16;RW;1;1
+0x2411;0x0;Internal Number of Entries (33);UNSIGNED8;RO;1;1
+0x2411;0x1;Internal Resistance;UNSIGNED16;RO;1;1
+0x2411;0x2;Internal Inductivity;UNSIGNED16;RO;1;1
+0x2411;0x3;Internal Frequency;UNSIGNED16;RO;1;1
+0x2FFF;0x0;Internal Number of Entries (34);UNSIGNED8;RO;1;1
+0x2FFF;0x1;Internal Download Start;UNSIGNED32;WO;1;1
+0x2FFF;0x2;Internal Download Number of SubSections;UNSIGNED16;RW;1;1
+0x2FFF;0x3;Internal Download Code SubSection;DOMAIN;WO;1;1
+0x2FFF;0x4;Internal Download Boot Code Version;UNSIGNED16;RO;1;0
+0x2FFF;0x5;Internal Download Serial Number HighWord;UNSIGNED32;CONST;1;0
+0x2FFF;0x6;Internal Download Serial Number LowWord;UNSIGNED32;CONST;1;0
+0x6007;0x0;Abort Connection Option Code;INTEGER16;RW;0;0
+0x6040;0x0;ControlWord;UNSIGNED16;RW;1;1
+0x6041;0x0;StatusWord;UNSIGNED16;RO;0;1
+0x605B;0x0;Shutdown Option Code;INTEGER16;RW;0;0
+0x605C;0x0;Disable Operation Option Code;INTEGER16;RW;0;0
+0x605E;0x0;Fault Reaction Option Code;INTEGER16;RW;0;0
+0x6060;0x0;Modes of Operation;INTEGER8;RW;1;1
+0x6061;0x0;Modes of Operation Display;INTEGER8;RO;0;1
+0x6062;0x0;Position Demand Value;INTEGER32;RO;0;1
+0x6064;0x0;Position Actual Value;INTEGER32;RO;0;1
+0x6065;0x0;Max Following Error;UNSIGNED32;RW;1;1
+0x6067;0x0;Position Window;UNSIGNED32;RW;0;0
+0x6068;0x0;Position Window Time;UNSIGNED16;RW;0;0
+0x6069;0x0;Velocity Sensor Actual Value;INTEGER32;RO;0;1
+0x606B;0x0;Velocity Demand Value;INTEGER32;RO;0;1
+0x606C;0x0;Velocity Actual Value;INTEGER32;RO;0;1
+0x606D;0x0;Velocity Window;UNSIGNED32;RW;0;0
+0x606E;0x0;Velocity Window Time;UNSIGNED16;RW;0;0
+0x6078;0x0;Current Actual Value;INTEGER16;RO;0;1
+0x607A;0x0;Target Position;INTEGER32;RW;1;1
+0x607C;0x0;Home Offset;INTEGER32;RW;1;1
+0x607D;0x0;Internal Number of Entries (35);UNSIGNED8;RO;1;1
+0x607D;0x1;Min Position Limit;INTEGER32;RW;0;0
+0x607D;0x2;Max Position Limit;INTEGER32;RW;0;0
+0x607F;0x0;Max Profile Velocity;UNSIGNED32;RW;0;0
+0x6081;0x0;Profile Velocity;UNSIGNED32;RW;1;1
+0x6083;0x0;Profile Acceleration;UNSIGNED32;RW;1;1
+0x6084;0x0;Profile Deceleration;UNSIGNED32;RW;1;1
+0x6085;0x0;QuickStop Deceleration;UNSIGNED32;RW;1;1
+0x6086;0x0;Motion Profile Type;INTEGER16;RW;1;1
+0x6089;0x0;Position Notation Index;INTEGER8;RW;0;0
+0x608A;0x0;Position Dimension Index;UNSIGNED8;RW;0;0
+0x608B;0x0;Velocity Notation Index;INTEGER8;RW;0;0
+0x608C;0x0;Velocity Dimension Index;UNSIGNED8;RW;0;0
+0x608D;0x0;Acceleration Notation Index;INTEGER8;RW;0;0
+0x608E;0x0;Acceleration Dimension Index;UNSIGNED8;RW;0;0
+0x6098;0x0;Homing Method;INTEGER8;RW;1;1
+0x6099;0x0;Internal Number of Entries (36);UNSIGNED8;RO;1;1
+0x6099;0x1;Speed for Switch Search;UNSIGNED32;RW;1;1
+0x6099;0x2;Speed for Zero Search;UNSIGNED32;RW;1;1
+0x609A;0x0;Homing Acceleration;UNSIGNED32;RW;1;1
+0x60C0;0x0;Interpolation Sub Mode Selection;INTEGER16;RW;1;1
+0x60C2;0x0;Internal Number of Entries (37);UNSIGNED8;RO;1;1
+0x60C2;0x1;Interpolation Time Periode Value;UNSIGNED8;RW;1;1
+0x60C2;0x2;Interpolation Time Index;INTEGER8;RW;1;1
+0x60C4;0x0;Internal Number of Entries (38);UNSIGNED8;RO;1;1
+0x60C4;0x1;Maximum Buffer Size;UNSIGNED32;RO;1;1
+0x60C4;0x2;Actual Buffer Size;UNSIGNED32;RO;1;1
+0x60C4;0x3;Buffer Organisation;UNSIGNED8;RW;0;0
+0x60C4;0x4;Buffer Position;UNSIGNED16;RW;0;0
+0x60C4;0x5;Size Of Data Record;UNSIGNED8;WO;1;1
+0x60C4;0x6;Buffer Clear;UNSIGNED8;WO;1;0
+0x60C5;0x0;Max Acceleration;UNSIGNED32;RW;0;0
+0x60F6;0x0;Internal Number of Entries (39);UNSIGNED8;RO;1;1
+0x60F6;0x1;Current Regulator P-Gain;INTEGER16;RW;1;1
+0x60F6;0x2;Current Regulator I-Gain;INTEGER16;RW;1;1
+0x60F9;0x0;Internal Number of Entries (40);UNSIGNED8;RO;1;1
+0x60F9;0x1;Speed Regulator P-Gain;INTEGER16;RW;1;1
+0x60F9;0x2;Speed Regulator I-Gain;INTEGER16;RW;1;1
+0x60F9;0x4;Velocity Feedforward Factor in Speed Regulator;UNSIGNED16;RW;1;1
+0x60F9;0x5;Acceleration Feedforward Factor in Speed Regulator;UNSIGNED16;RW;1;1
+0x60FB;0x0;Internal Number of Entries (41);UNSIGNED8;RO;1;1
+0x60FB;0x1;Position Regulator P-Gain;INTEGER16;RW;1;1
+0x60FB;0x2;Position Regulator I-Gain;INTEGER16;RW;1;1
+0x60FB;0x3;Position Regulator D-Gain;INTEGER16;RW;1;1
+0x60FB;0x4;Velocity Feedforward Factor in Position Regulator;UNSIGNED16;RW;1;1
+0x60FB;0x5;Acceleration Feedforward Factor in Position Regulator;UNSIGNED16;RW;1;1
+0x60FF;0x0;Target Velocity;INTEGER32;RW;1;1
+0x6402;0x0;Motor Type;UNSIGNED16;RW;0;0
+0x6410;0x0;Internal Number of Entries (42);UNSIGNED8;RO;1;1
+0x6410;0x1;Continuous Current Limit;UNSIGNED16;RW;1;1
+0x6410;0x2;Output Current Limit;UNSIGNED16;RW;1;1
+0x6410;0x3;Pole Pair Number;UNSIGNED8;RW;0;0
+0x6410;0x4;Maximal Motor Speed;UNSIGNED32;RW;1;1
+0x6410;0x5;Thermal Time Constant Winding;UNSIGNED16;RW;0;0
+0x6502;0x0;Supported Drive Modes;UNSIGNED32;CONST;1;0
