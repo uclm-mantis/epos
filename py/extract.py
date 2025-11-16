@@ -53,7 +53,7 @@ df['getter'] = np.where(
 )
 df['ctype'] = df['type'].apply(generate_ctype)
 
-header_file = 'include/object_dictionary.h'
+header_file = 'src/object_dictionary.h'
 
 
 od = []
