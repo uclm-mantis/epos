@@ -15,7 +15,20 @@ Although it is still a work in progress, we believe it has reached a quite useab
 
 ## Usage
 
-* Deploy the project as usual with ESP-IDF. We usually use the Expressif ESP-IDF Visual Studio Code extension.
+* Add external dependency to your project. In ESP-IDF you may add `main/idf_component.yml` with the following:
+
+```
+version: "0.1.0"
+description: "Your software"
+url: "https://github.com/your-repo"
+
+dependencies:
+  epos:
+    git: https://github.com/uclm-mantis/epos.git
+```
+
+* In Arduino IDE you may download [EPOS-CAN zip library](https://github.com/uclm-mantis/epos/archive/refs/heads/main.zip) and then "Add .ZIP library" in your Arduino IDE.
+
 * Connect with your board using a Monitor. Sometimes the ESP-IDF builtin monitor on Windows is not recognized as an ANSI capable monitor and the console thread falls back to dumb mode. You may either press the reset button in the development board or use a different monitor application (such as *putty*).
 * The console implements full line editing, completion and history using `linenoise`.
 
