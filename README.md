@@ -1,6 +1,6 @@
 # EPOS-CAN
 
-EPOS-CAN is a lightweight library for managing Maxon EPOS devices using Espressif microcontrollers with ESP-IDF. It allows interaction with PDO, SDO (upload and download), and NMT protocols. It features a serial console compatible with CiA 309-3 and includes numerous functionalities to make the interaction more user-friendly.
+EPOS-CAN is a lightweight library for managing Maxon EPOS devices using Espressif microcontrollers with ESP-IDF and Arduino IDE. It allows interaction with PDO, SDO (upload and download), and NMT protocols. It features a serial console compatible with CiA 309-3 and includes numerous functionalities to make the interaction more user-friendly.
 
 Although it is still a work in progress, we believe it has reached a quite useable state and therefore we are making it public.
 
