@@ -80,7 +80,7 @@ I (2624560) EPOS: Skip 00000702 (2 bytes) 00 00 00 00 00 00 00 00
 COB-ID 0x702 signals an NMT heartbeat. Payload with a 0 means the EPOS is in *bootup* state. From now on the EPOS is able to handle SDO requests. Let us activate the device writing into the *control_word* object (`index=0x6040, subindex=0`).
 
 ```
-> w control_word 0
+> w controlword 0
 ```
 
 In a fully compliant CiA console you would write `w 0x6040 0 u16 0`. This is not needed in EPOS-CAN because the console already knows the object dictionary of the EPOS device. Of course you may use the standard syntax and you may also use the help feature to find the right index, subindex and type of an object:
@@ -89,15 +89,15 @@ In a fully compliant CiA console you would write `w 0x6040 0 u16 0`. This is not
 > help contr
 Objects starting with contr:
   2220 00 u16 RW controller_structure
-  6040 00 u16 RW control_word
+  6040 00 u16 RW controlword
 ```
 
 Now let us complete the activation sequence:
 
 ```
-> w control_word 6
-> w control_word 7
-> w control_word 0xf
+> w controlword 6
+> w controlword 7
+> w controlword 0xf
 ```
 
 Nothe that you may us the cursor *up* key to recall previous command and then edit that command to issue the new one.
