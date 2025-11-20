@@ -1,9 +1,6 @@
 #ifndef EPOS_H
 #define EPOS_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -13,6 +10,11 @@ extern "C" {
 #include "canopen_types.h"
 #include "esp_err.h"
 #include "driver/twai.h"
+#include "driver/gpio.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #define DEFAULT_CAN_TX 22
 #define DEFAULT_CAN_RX 21

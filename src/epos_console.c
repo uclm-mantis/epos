@@ -689,7 +689,7 @@ static void epos_initialize_console(void)
         .data_bits = UART_DATA_8_BITS,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
-        .source_clk = UART_SCLK_REF_TICK,
+        .source_clk = UART_SCLK_DEFAULT,
     };
     ESP_ERROR_CHECK( uart_driver_install(0, 256, 0, 0, NULL, 0) );
     ESP_ERROR_CHECK( uart_param_config(0, &uart_config) );

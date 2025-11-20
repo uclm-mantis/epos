@@ -50,7 +50,7 @@ motor_init(Motor_t* self, uint8_t node)
     self->limits[1] = -1;
     self->mode = UNKNOWN_MODE;
     self->threshold = 6000;
-    self->sample_period = CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ * 10000;
+    self->sample_period = CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ * 10000;
     ESP_RETURN_ON_ERROR(get_position_actual_value(node, &self->position), TAG, "Unable to get actual position");
     return ESP_OK;
 }
