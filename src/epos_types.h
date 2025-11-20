@@ -1,12 +1,11 @@
-#ifndef EPOS_TYPES_H
-#define EPOS_TYPES_H
+#pragma once
+
+#include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <stdint.h>
-#include <stdbool.h>
 
 typedef union {
     uint8_t value;
@@ -212,6 +211,4 @@ typedef union {
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif

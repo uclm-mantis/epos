@@ -1,5 +1,4 @@
-#ifndef EPOSCAN_HH
-#define EPOSCAN_HH
+#pragma once
 
 /*
     Thin wrapper de la API C de EPOS-CAN. Utiliza la documentación en las cabeceras
@@ -57,7 +56,7 @@ private:
 
 class CAN {
 public:
-    CAN(gpio_num_t can_tx = GPIO_NUM_22, gpio_num_t can_rx = GPIO_NUM_21): _tx(can_tx), _rx(can_rx) {}
+    CAN(gpio_num_t can_tx = (gpio_num_t)DEFAULT_CAN_TX, gpio_num_t can_rx = (gpio_num_t)DEFAULT_CAN_RX): _tx(can_tx), _rx(can_rx) {}
 
     void begin(bool activate_console);
     void done(void) { epos_done(); epos_wait_done(); }
@@ -268,5 +267,3 @@ private:
 };
 
 }
-
-#endif

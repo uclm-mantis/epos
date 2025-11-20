@@ -1,11 +1,10 @@
-#ifndef MOVING_AVERAGE
-#define MOVING_AVERAGE
+#pragma once
+
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include <string.h>
 
 /*! @brief Macro para generar la declaración de un objeto de media móvil
 
@@ -58,4 +57,3 @@ MOVING_AVERAGE_TYPE(int16_t, 16, 0L)
 }
 #endif
 
-#endif

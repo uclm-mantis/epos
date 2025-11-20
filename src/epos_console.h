@@ -1,11 +1,10 @@
-#ifndef EPOS_CONSOLE_H
-#define EPOS_CONSOLE_H
+#pragma once
+
+# include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-# include <stdbool.h>
 
 typedef struct {
     int sequence;
@@ -48,6 +47,4 @@ object_dictionary_entry_t* get_dictionary_entry(const char* sym, const char* dat
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif

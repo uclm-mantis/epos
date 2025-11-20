@@ -1,13 +1,12 @@
-#ifndef EPOS_MOTOR_H
-#define EPOS_MOTOR_H
-
-#ifdef __cplusplus
-extern "C" {
-#endif
+#pragma once
 
 #include "epos_types.h"
 #include "esp_cpu.h"
 #include "esp_err.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /*! @brief Estructura principal que representa un motor
     
@@ -349,6 +348,4 @@ void print_controlword(OperationMode_t mode, ControlWord_t c);
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif

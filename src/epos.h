@@ -1,6 +1,4 @@
-#ifndef EPOS_H
-#define EPOS_H
-
+#pragma once
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -123,6 +121,3 @@ extern bool enable_dump_msg;
 #ifdef __cplusplus
 }
 #endif
-
-#endif
-

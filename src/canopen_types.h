@@ -1,11 +1,11 @@
-#ifndef CANOPEN_TYPES_H
-#define CANOPEN_TYPES_H
+#pragma once
+
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <stdint.h>
 /*
     NOTA (FMF): Intento utilizar la misma nomenclatura que el estándar CANopen CiA 301 y la misma descomposición
     en protocolos independientes. 
@@ -205,6 +205,4 @@ typedef struct __attribute__((packed)) {
 
 #ifdef __cplusplus
 }
-#endif
-
 #endif
