@@ -13,26 +13,250 @@ Although it is still a work in progress, we believe it has reached a quite useab
 * SN65HVD230 or equivalent transceiver
 * Maxon EPOS Drive Controller
 
-## Usage
+## Installation
 
-* Add external dependency to your project. In ESP-IDF you may add `main/idf_component.yml` with the following:
+### ESP-IDF
 
-```
-version: "0.1.0"
-description: "Your software"
-url: "https://github.com/your-repo"
+#### Method 1: Managed Component (Recommended)
 
+Add the component as a dependency using the ESP-IDF Component Manager. This method automatically manages updates and dependencies.
+
+1. Create or edit `main/idf_component.yml` in your project:
+
+```yaml
 dependencies:
   epos:
     git: https://github.com/uclm-mantis/epos.git
 ```
 
-* In Arduino IDE you may download [EPOS-CAN zip library](https://github.com/uclm-mantis/epos/archive/refs/heads/main.zip) and then "Add .ZIP library" in your Arduino IDE.
+2. Build your project:
+
+```bash
+idf.py build
+```
+
+3. The component will be automatically downloaded to `managed_components/epos/`
+
+4. Include in your code:
+
+```c
+#include "epos.h"
+```
+
+#### Method 2: Git Submodule
+
+Add the repository as a git submodule to your project's components directory:
+
+```bash
+cd your-project
+git submodule add https://github.com/uclm-mantis/epos.git components/epos
+git submodule update --init --recursive
+```
+
+### Arduino IDE
+
+#### Method 1: Install from ZIP (Recommended)
+
+1. Download the repository as a ZIP file:
+   - Go to [https://github.com/uclm-mantis/epos](https://github.com/uclm-mantis/epos)
+   - Click the green **Code** button
+   - Select **Download ZIP**
+
+2. In Arduino IDE, go to **Sketch → Include Library → Add .ZIP Library...**
+
+3. Select the downloaded `epos-main.zip` file
+
+4. The library will be installed and appear in **Sketch → Include Library → EposCAN**
+
+5. Include in your sketch:
+
+```cpp
+#include <EposCAN.h>
+```
+
+#### Method 2: Manual Installation
+
+1. Copy this repository to your Arduino libraries directory:
+   - **Windows**: `Documents\Arduino\libraries\EposCAN\`
+   - **macOS**: `~/Documents/Arduino/libraries/EposCAN/`
+   - **Linux**: `~/Arduino/libraries/EposCAN/`
+
+2. Restart Arduino IDE
+
+3. The library will appear in **Sketch → Include Library → EposCAN**
+
+## Usage
+
+### Programmatic Usage
+
+#### ESP-IDF Example (High-Level Motor API)
+
+The high-level API from `epos_motor.h` provides an object-oriented interface for motor control:
+
+```c
+#include "epos.h"
+#include "epos_motor.h"
+
+void app_main(void)
+{
+    // Initialize EPOS with console enabled
+    epos_initialize(true);
+    
+    // Create motor instance for node 2
+    Motor_t* motor = motor_new(2);
+    
+    // Reset and activate motor
+    motor_reset(motor);
+    
+    // Configure profile parameters
+    MotorProfile_t profile = {
+        .velocity = 1000,
+        .acceleration = 5000,
+        .deceleration = 5000,
+        .type = PPM_TRAPEZOIDAL
+    };
+    motor_set_profile(motor, &profile);
+    
+    // Move to absolute position
+    motor_profile_position_absolute(motor, 10000);
+    
+    // Wait until target is reached
+    motor_wait_target_reached(motor);
+    
+    printf("Movement completed!\n");
+}
+```
+
+#### ESP-IDF Example (EDS-Generated API)
+
+The EDS API provides type-safe functions generated from the EPOS object dictionary:
+
+```c
+#include "epos.h"
+
+void app_main(void)
+{
+    // Initialize EPOS with console enabled
+    epos_initialize(true);
+    
+    // Set target node
+    uint8_t node = 2;
+    
+    // Reset node
+    nmt_reset_node(node);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    // Activate the device
+    set_controlword(node, 0);
+    set_controlword(node, 6);
+    set_controlword(node, 7);
+    set_controlword(node, 0x0f);
+    
+    // Set current mode
+    set_modes_of_operation(node, -3);
+    
+    // Set desired current (500 mA)
+    set_current_mode_setting_value(node, 500);
+    
+    // Read actual current
+    int16_t current;
+    get_current_actual_value(node, &current);
+    printf("Actual current: %d mA\n", current);
+}
+```
+
+#### CANopen API
+
+The CANopen API provides direct access to CANopen communication services (SDO, NMT, PDO, EMCY). This example shows SDO usage:
+
+```c
+#include "epos.h"
+
+void app_main(void)
+{
+    // Initialize EPOS with console enabled
+    epos_initialize(true);
+    
+    // Set target node
+    uint8_t node = 2;
+    uint32_t cob_id = 0x600 + node;  // SDO client-to-server
+    
+    // Reset node using NMT
+    nmt_reset_node(node);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    // Activate the device using SDO download
+    uint16_t controlword;
+    
+    controlword = 0;
+    sdo_download(cob_id, 0x6040, 0, &controlword, sizeof(controlword));
+    
+    controlword = 6;
+    sdo_download(cob_id, 0x6040, 0, &controlword, sizeof(controlword));
+    
+    controlword = 7;
+    sdo_download(cob_id, 0x6040, 0, &controlword, sizeof(controlword));
+    
+    controlword = 0x0f;
+    sdo_download(cob_id, 0x6040, 0, &controlword, sizeof(controlword));
+    
+    // Set current mode (index 0x6060, subindex 0)
+    int8_t mode = -3;  // Current mode
+    sdo_download(cob_id, 0x6060, 0, &mode, sizeof(mode));
+    
+    // Set desired current (index 0x2030, subindex 0) - 500 mA
+    int16_t current_setting = 500;
+    sdo_download(cob_id, 0x2030, 0, &current_setting, sizeof(current_setting));
+    
+    // Read actual current (index 0x6078, subindex 0)
+    int16_t current_actual;
+    sdo_upload(cob_id, 0x6078, 0, &current_actual);
+    printf("Actual current: %d mA\n", current_actual);
+}
+```
+
+For detailed documentation on each CANopen service, see the sections below.
+
+#### Arduino Example
+
+```cpp
+#include <EposCAN.h>
+
+EPOS::CAN can;
+EPOS::Motor motor(1);  // Node ID 1
+
+void setup()
+{
+    Serial.begin(115200);
+    
+    // Initialize CAN with console enabled
+    can.begin(true);
+    
+    // Reset and activate motor
+    motor.reset();
+    
+    // Example: Profile position mode
+    motor.profile_position_relative(32000);
+}
+
+void loop()
+{
+    if (motor.is_target_reached()) {
+        Serial.println("Target reached!");
+        delay(1000);
+    }
+}
+```
+
+### Console Usage
+
+The EPOS-CAN library includes a powerful serial console for interactive CANopen communication.
 
 * Connect with your board using a Monitor. Sometimes the ESP-IDF builtin monitor on Windows is not recognized as an ANSI capable monitor and the console thread falls back to dumb mode. You may either press the reset button in the development board or use a different monitor application (such as *putty*).
 * The console implements full line editing, completion and history using `linenoise`.
 
-### Basic commands
+#### Basic commands
+
 
 The console is almost compatible with CiA 309 as implemented by CANopenNode. Please, note that we do not have direct access to CiA 309, we do not aim at a fully compliant implementation. Nonetheless, although we implement significant improvements over a basic CiA 309, the only known minor departure from CiA 309 has to do with negative numbers. See below.
 
@@ -77,7 +301,7 @@ This triggers a transition to the *Initialisation* state. After a while the EPOS
 I (2624560) EPOS: Skip 00000702 (2 bytes) 00 00 00 00 00 00 00 00
 ```
 
-COB-ID 0x702 signals an NMT heartbeat. Payload with a 0 means the EPOS is in *bootup* state. From now on the EPOS is able to handle SDO requests. Let us activate the device writing into the *control_word* object (`index=0x6040, subindex=0`).
+COB-ID 0x702 signals an NMT heartbeat. Payload with a 0 means the EPOS is in *bootup* state. From now on the EPOS is able to handle SDO requests. Let us activate the device writing into the *controlword* object (`index=0x6040, subindex=0`).
 
 ```
 > w controlword 0
@@ -132,22 +356,60 @@ And finally stop it:
 > w current_mode_setting_value 0
 ```
 
-### NMT programatic usage
+## CANopen API Reference
 
-### SDO programmatic usage
+The library provides direct access to CANopen communication services. This section documents the low-level CANopen API.
 
-See `components/fc/*` as an example of API usage. For each object in the object dictionary you have a `setter` if it is writeable and a `getter` if it is readable.  Syntax of a setter is as follows:
+### NMT (Network Management)
 
-```C
-esp_err_t ec = set_control_word(n, 7);
+NMT services control the state of CANopen nodes:
+
+```c
+#include "epos.h"
+
+// Reset node (triggers boot-up)
+esp_err_t nmt_reset_node(uint8_t node);
+
+// Reset communication only
+esp_err_t nmt_reset_communication(uint8_t node);
+
+// Start remote node (transition to Operational)
+esp_err_t nmt_start_remote_node(uint8_t node);
+
+// Stop remote node
+esp_err_t nmt_stop_remote_node(uint8_t node);
+
+// Enter pre-operational state
+esp_err_t nmt_enter_preoperational(uint8_t node);
 ```
 
-First argument is the Node ID, second argument is the value to be set. The type of `value` is given in the object dictionary (see `components/epos/object_dictionary.h`). It should return `ESP_OK` if everything goes as expected.
+Example:
 
-A bitwise description of the types required for a given object is also available in `components/epos/epos_types.h`. For example, type `ControlWord_t` allows bit-level manipulation of the control word. The above example may also be written as:
+```c
+uint8_t node = 2;
+
+// Reset and wait for boot-up
+nmt_reset_node(node);
+vTaskDelay(pdMS_TO_TICKS(1000));
+
+// Start node (enter Operational state)
+nmt_start_remote_node(node);
+```
+
+### SDO (Service Data Object)
+
+For each object in the object dictionary you have a `setter` if it is writeable and a `getter` if it is readable.  Syntax of a setter is as follows:
 
 ```C
-esp_err_t ec = set_control_word(n, (ControlWord_t){.enable_voltage = 1, .quickstop = 1, .switch_on = 1});
+esp_err_t ec = set_controlword(n, 7);
+```
+
+First argument is the Node ID, second argument is the value to be set. The type of `value` is given in the object dictionary (see `object_dictionary.h`). It should return `ESP_OK` if everything goes as expected.
+
+A bitwise description of the types required for a given object is also available in `epos_types.h`. For example, type `ControlWord_t` allows bit-level manipulation of the control word. The above example may also be written as:
+
+```C
+esp_err_t ec = set_controlword(n, (ControlWord_t){.enable_voltage = 1, .quickstop = 1, .switch_on = 1});
 ```
 
 Getters are similar but second argument is a pointer to the location of the actual value.  For example, you may read the actual current value (in mA) as follows:
@@ -157,11 +419,11 @@ int16_t current;
 esp_err_t ec = get_current_actual_value(node, &current);
 ```
 
-Sometimes you may also require bit-level manipulation of the return value. Use the types provided in `components/epos/epos_types.h` as follows:
+Sometimes you may also require bit-level manipulation of the return value. Use the types provided in `epos_types.h` as follows:
 
 ```C
 StatusWord_t status;
-esp_err_t ec = get_status_word(n, (uint16_t*)&status);
+esp_err_t ec = get_statusword(n, (uint16_t*)&status);
 if (status.target_reached) {
     // ...
 }
@@ -169,7 +431,36 @@ if (status.target_reached) {
 
 SDO interaction is synchronous. If there is an ongoing SDO request while the running thread starts another SDO request then the running thread would block until a response is received for the ongoing SDO request.  There is a setable parameter `sdo_timeout` to adjust the maximum waiting time before a TIMEOUT error is returned.
 
-### PDO, NMT heartbeats, EMCY
+#### Low-Level SDO Functions
+
+For direct CANopen communication:
+
+```c
+// Download (write) data to object dictionary
+esp_err_t sdo_download(uint32_t cob_id, uint16_t index, uint8_t subindex, 
+                       void* value, size_t size);
+
+// Upload (read) data from object dictionary
+esp_err_t sdo_upload(uint32_t cob_id, uint16_t index, uint8_t subindex, 
+                     void* ret);
+```
+
+Example:
+
+```c
+uint8_t node = 2;
+uint32_t cob_id = 0x600 + node;
+
+// Write controlword (0x6040)
+uint16_t controlword = 0x0f;
+sdo_download(cob_id, 0x6040, 0, &controlword, sizeof(controlword));
+
+// Read statusword (0x6041)
+uint16_t statusword;
+sdo_upload(cob_id, 0x6041, 0, &statusword);
+```
+
+### PDO (Process Data Object), NMT Heartbeats, EMCY
 
 There are two ways to receive asynchronous notifications such as NMT heartbeats, PDO notifications or EMCY errors. The simplest interface is the synchronous interface.  Yoy may wait for a specific notification. For example, supose you are waiting for actual velocity updates from a periodic PDO with COB-ID 0x182 (0x180 + node ID).
 
