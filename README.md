@@ -510,7 +510,7 @@ Developed by UCLM [Mantis Research Group](https://uclm-mantis.github.io/).
 
 Contact: [mantis@on.uclm.es](mailto:mantis@on.uclm.es).
 
-### Contributors:
+### Contributors
 
 * Fernando Castillo García
 * Antonio González Rodríguez
