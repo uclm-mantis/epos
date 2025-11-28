@@ -9,6 +9,7 @@
 #include "esp_err.h"
 #include "driver/twai.h"
 #include "driver/gpio.h"
+#include "driver/uart.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,6 +17,47 @@ extern "C" {
 
 #define DEFAULT_CAN_TX 22
 #define DEFAULT_CAN_RX 21
+
+typedef struct {
+    uart_port_t port;
+    int tx_pin; // use UART_PIN_NO_CHANGE to keep current pinout
+    int rx_pin;
+    uart_config_t uart_cfg;
+    int rx_buffer_size;
+    int tx_buffer_size;
+    bool redirect_stdio;
+} epos_console_uart_cfg_t;
+
+#define EPOS_CONSOLE_UART_DEFAULT() { \
+    .port = UART_NUM_0, \
+    .tx_pin = UART_PIN_NO_CHANGE, \
+    .rx_pin = UART_PIN_NO_CHANGE, \
+    .uart_cfg = { .baud_rate = 115200, .data_bits = UART_DATA_8_BITS, .parity = UART_PARITY_DISABLE, \
+                  .stop_bits = UART_STOP_BITS_1, .source_clk = UART_SCLK_DEFAULT }, \
+    .rx_buffer_size = 256, \
+    .tx_buffer_size = 0, \
+    .redirect_stdio = true, \
+}
+
+typedef struct {
+    bool enable_console;
+    epos_console_uart_cfg_t console_uart;
+    gpio_num_t can_tx_pin;
+    gpio_num_t can_rx_pin;
+} epos_init_cfg_t;
+
+#define EPOS_INIT_DEFAULT() { \
+    .enable_console = true, \
+    .console_uart = EPOS_CONSOLE_UART_DEFAULT(), \
+    .can_tx_pin = DEFAULT_CAN_TX, \
+    .can_rx_pin = DEFAULT_CAN_RX, \
+}
+
+static inline epos_init_cfg_t epos_init_default(void)
+{
+    const epos_init_cfg_t cfg = EPOS_INIT_DEFAULT();
+    return cfg;
+}
 
 esp_err_t nmt_enter_preoperational(uint8_t node);
 esp_err_t nmt_reset_communication(uint8_t node);
@@ -27,8 +69,7 @@ esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void* valu
 esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void* ret);
 esp_err_t nmt(uint8_t cs, uint8_t n);
 void epos_done(void);
-void epos_set_tx_rx_pins(gpio_num_t tx, gpio_num_t rx);
-esp_err_t epos_initialize(bool activate_console);
+esp_err_t epos_initialize(const epos_init_cfg_t *cfg);
 esp_err_t epos_wait_done(void);
 esp_err_t epos_wait_until(uint32_t cobid, void* ret);
 

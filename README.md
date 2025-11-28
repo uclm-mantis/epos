@@ -100,7 +100,9 @@ The high-level API from `epos_motor.h` provides an object-oriented interface for
 void app_main(void)
 {
     // Initialize EPOS with console enabled
-    epos_initialize(true);
+    epos_init_cfg_t cfg = epos_init_default();
+    cfg.enable_console = true;
+    epos_initialize(&cfg);
     
     // Create motor instance for node 2
     Motor_t* motor = motor_new(2);
@@ -137,7 +139,9 @@ The EDS API provides type-safe functions generated from the EPOS object dictiona
 void app_main(void)
 {
     // Initialize EPOS with console enabled
-    epos_initialize(true);
+    epos_init_cfg_t cfg = epos_init_default();
+    cfg.enable_console = true;
+    epos_initialize(&cfg);
     
     // Set target node
     uint8_t node = 2;
@@ -175,7 +179,9 @@ The CANopen API provides direct access to CANopen communication services (SDO, N
 void app_main(void)
 {
     // Initialize EPOS with console enabled
-    epos_initialize(true);
+    epos_init_cfg_t cfg = epos_init_default();
+    cfg.enable_console = true;
+    epos_initialize(&cfg);
     
     // Set target node
     uint8_t node = 2;

@@ -674,26 +674,25 @@ static void completion_callback(const char *buf, linenoiseCompletions *lc)
     }
 }
 
-static void epos_initialize_console(void)
+static void epos_initialize_console(const epos_console_uart_cfg_t* cfg)
 {
+    if (cfg == NULL) return;
     fflush(stdout);
     fsync(fileno(stdout));
     setvbuf(stdin, NULL, _IONBF, 0); // no buffering in stdin
     // Minicom, screen, idf_monitor send CR when ENTER key is pressed
-    uart_vfs_dev_port_set_rx_line_endings(0, ESP_LINE_ENDINGS_CR);
+    uart_vfs_dev_port_set_rx_line_endings(cfg->port, ESP_LINE_ENDINGS_CR);
     // Move the caret to the beginning of the next line on '\n'
-    uart_vfs_dev_port_set_tx_line_endings(0, ESP_LINE_ENDINGS_CRLF);
+    uart_vfs_dev_port_set_tx_line_endings(cfg->port, ESP_LINE_ENDINGS_CRLF);
 
-    const uart_config_t uart_config = {
-        .baud_rate = 115200,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
-    ESP_ERROR_CHECK( uart_driver_install(0, 256, 0, 0, NULL, 0) );
-    ESP_ERROR_CHECK( uart_param_config(0, &uart_config) );
-    uart_vfs_dev_use_driver(0);
+    ESP_ERROR_CHECK(uart_driver_install(cfg->port, cfg->rx_buffer_size, cfg->tx_buffer_size, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_param_config(cfg->port, &cfg->uart_cfg));
+    if (cfg->tx_pin != UART_PIN_NO_CHANGE || cfg->rx_pin != UART_PIN_NO_CHANGE) {
+        ESP_ERROR_CHECK(uart_set_pin(cfg->port, cfg->tx_pin, cfg->rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    }
+    if (cfg->redirect_stdio) {
+        uart_vfs_dev_use_driver(cfg->port);
+    }
 
     esp_console_config_t console_config = {
         .max_cmdline_args = 8,
@@ -720,7 +719,12 @@ static void epos_initialize_console(void)
 
 void epos_console_task(void *arg)
 {
-    epos_initialize_console();
+    const epos_console_uart_cfg_t* cfg = (const epos_console_uart_cfg_t*)arg;
+    if (cfg == NULL) {
+        static epos_console_uart_cfg_t fallback_cfg = EPOS_CONSOLE_UART_DEFAULT();
+        cfg = &fallback_cfg;
+    }
+    epos_initialize_console(cfg);
     for(;;) {
         char* line = linenoise("> ");
         if (line == NULL) continue;
