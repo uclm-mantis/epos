@@ -15,8 +15,8 @@
 extern "C" {
 #endif
 
-#define DEFAULT_CAN_TX 22
-#define DEFAULT_CAN_RX 21
+#define DEFAULT_CAN_TX (gpio_num_t)22
+#define DEFAULT_CAN_RX (gpio_num_t)21
 
 typedef struct {
     uart_port_t port;
@@ -33,7 +33,8 @@ typedef struct {
     .tx_pin = UART_PIN_NO_CHANGE, \
     .rx_pin = UART_PIN_NO_CHANGE, \
     .uart_cfg = { .baud_rate = 115200, .data_bits = UART_DATA_8_BITS, .parity = UART_PARITY_DISABLE, \
-                  .stop_bits = UART_STOP_BITS_1, .source_clk = UART_SCLK_DEFAULT }, \
+                  .stop_bits = UART_STOP_BITS_1, .flow_ctrl = UART_HW_FLOWCTRL_DISABLE, \
+                  .rx_flow_ctrl_thresh = 0, .source_clk = UART_SCLK_DEFAULT }, \
     .rx_buffer_size = 256, \
     .tx_buffer_size = 0, \
     .redirect_stdio = true, \
