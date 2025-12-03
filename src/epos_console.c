@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include "driver/uart_vfs.h"
 #include "driver/uart.h"
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
 #include "esp_console.h"
 #include "esp_check.h"
 #include "argtable3/argtable3.h"
@@ -674,31 +676,44 @@ static void completion_callback(const char *buf, linenoiseCompletions *lc)
     }
 }
 
-static void epos_initialize_console(const epos_console_uart_cfg_t* cfg)
+static void epos_initialize_console(const epos_console_cfg_t* cfg)
 {
+    // En USB-SJTAG el cfg sólo lo usaremos para tamaños de buffer y tal.
     if (cfg == NULL) return;
+
     fflush(stdout);
     fsync(fileno(stdout));
-    setvbuf(stdin, NULL, _IONBF, 0); // no buffering in stdin
-    // Minicom, screen, idf_monitor send CR when ENTER key is pressed
-    uart_vfs_dev_port_set_rx_line_endings(cfg->port, ESP_LINE_ENDINGS_CR);
-    // Move the caret to the beginning of the next line on '\n'
-    uart_vfs_dev_port_set_tx_line_endings(cfg->port, ESP_LINE_ENDINGS_CRLF);
 
-    ESP_ERROR_CHECK(uart_driver_install(cfg->port, cfg->rx_buffer_size, cfg->tx_buffer_size, 0, NULL, 0));
-    ESP_ERROR_CHECK(uart_param_config(cfg->port, &cfg->uart_cfg));
-    if (cfg->tx_pin != UART_PIN_NO_CHANGE || cfg->rx_pin != UART_PIN_NO_CHANGE) {
-        ESP_ERROR_CHECK(uart_set_pin(cfg->port, cfg->tx_pin, cfg->rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    }
-    if (cfg->redirect_stdio) {
-        uart_vfs_dev_use_driver(cfg->port);
-    }
+    // ---- CONFIGURAR DISPOSITIVO DE CONSOLA SOBRE USB SERIAL/JTAG ----
+    // Equivalente a la rama USB-SJTAG del ejemplo console/advanced
+
+    // Fin de línea que llega del monitor (idf.py monitor manda CR al pulsar Enter)
+    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
+    // Cómo queremos que se envíen los \n
+    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
+
+    // Modo bloqueante en stdin/stdout (importante para linenoise)
+    fcntl(fileno(stdout), F_SETFL, 0);
+    fcntl(fileno(stdin),  F_SETFL, 0);
+
+    // Instalar driver USB-SJTAG
+    usb_serial_jtag_driver_config_t jtag_cfg = {
+        .tx_buffer_size = cfg->tx_buffer_size,   // o un valor fijo, p.ej. 256
+        .rx_buffer_size = cfg->rx_buffer_size,
+    };
+    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&jtag_cfg));
+
+    // Decir al VFS que use el driver USB-SJTAG para stdin/stdout/stderr
+    usb_serial_jtag_vfs_use_driver();
+
+    // Importante para que no haya buffering en stdin
+    setvbuf(stdin, NULL, _IONBF, 0);
 
     esp_console_config_t console_config = {
-        .max_cmdline_args = 8,
+        .max_cmdline_args   = 8,
         .max_cmdline_length = 256,
     };
-    ESP_ERROR_CHECK( esp_console_init(&console_config) );
+    ESP_ERROR_CHECK(esp_console_init(&console_config));
 
     linenoiseSetMultiLine(0);
     linenoiseSetCompletionCallback(&completion_callback);
@@ -717,11 +732,15 @@ static void epos_initialize_console(const epos_console_uart_cfg_t* cfg)
     epos_console_register_commands();
 }
 
+
+
 void epos_console_task(void *arg)
 {
-    const epos_console_uart_cfg_t* cfg = (const epos_console_uart_cfg_t*)arg;
+    const epos_console_cfg_t* cfg = (const epos_console_cfg_t*)arg;
     if (cfg == NULL) {
-        static epos_console_uart_cfg_t fallback_cfg = EPOS_CONSOLE_UART_DEFAULT();
+        printf("\n"
+               "No hay config, usando default.\n");
+        static epos_console_cfg_t fallback_cfg = EPOS_CONSOLE_DEFAULT();
         cfg = &fallback_cfg;
     }
     epos_initialize_console(cfg);

@@ -9,47 +9,34 @@
 #include "esp_err.h"
 #include "driver/twai.h"
 #include "driver/gpio.h"
-#include "driver/uart.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define DEFAULT_CAN_TX (gpio_num_t)22
-#define DEFAULT_CAN_RX (gpio_num_t)21
+#define DEFAULT_CAN_TX (gpio_num_t)17
+#define DEFAULT_CAN_RX (gpio_num_t)18
 
 typedef struct {
-    uart_port_t port;
-    int tx_pin; // use UART_PIN_NO_CHANGE to keep current pinout
-    int rx_pin;
-    uart_config_t uart_cfg;
     int rx_buffer_size;
     int tx_buffer_size;
-    bool redirect_stdio;
-} epos_console_uart_cfg_t;
+} epos_console_cfg_t;
 
-#define EPOS_CONSOLE_UART_DEFAULT() { \
-    .port = UART_NUM_0, \
-    .tx_pin = UART_PIN_NO_CHANGE, \
-    .rx_pin = UART_PIN_NO_CHANGE, \
-    .uart_cfg = { .baud_rate = 115200, .data_bits = UART_DATA_8_BITS, .parity = UART_PARITY_DISABLE, \
-                  .stop_bits = UART_STOP_BITS_1, .flow_ctrl = UART_HW_FLOWCTRL_DISABLE, \
-                  .rx_flow_ctrl_thresh = 0, .source_clk = UART_SCLK_DEFAULT }, \
+#define EPOS_CONSOLE_DEFAULT() { \
     .rx_buffer_size = 256, \
-    .tx_buffer_size = 0, \
-    .redirect_stdio = true, \
+    .tx_buffer_size = 256, \
 }
 
 typedef struct {
     bool enable_console;
-    epos_console_uart_cfg_t console_uart;
+    epos_console_cfg_t console;
     gpio_num_t can_tx_pin;
     gpio_num_t can_rx_pin;
 } epos_init_cfg_t;
 
 #define EPOS_INIT_DEFAULT() { \
     .enable_console = true, \
-    .console_uart = EPOS_CONSOLE_UART_DEFAULT(), \
+    .console = EPOS_CONSOLE_DEFAULT(), \
     .can_tx_pin = DEFAULT_CAN_TX, \
     .can_rx_pin = DEFAULT_CAN_RX, \
 }

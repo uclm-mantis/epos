@@ -411,7 +411,7 @@ void epos_console_task(void *arg);
 static twai_timing_config_t t_config = TWAI_TIMING_CONFIG_1MBITS();
 static twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 static twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(DEFAULT_CAN_TX, DEFAULT_CAN_RX, TWAI_MODE_NORMAL);
-static epos_console_uart_cfg_t console_uart_cfg = EPOS_CONSOLE_UART_DEFAULT();
+static epos_console_cfg_t console_cfg = EPOS_CONSOLE_DEFAULT();
 
 static void initialize_nvs(void)
 {
@@ -428,7 +428,7 @@ esp_err_t epos_initialize(const epos_init_cfg_t *cfg)
     ESP_RETURN_ON_FALSE((cfg != NULL), ESP_ERR_INVALID_ARG, TAG, "NULL init cfg");
     g_config.tx_io = cfg->can_tx_pin;
     g_config.rx_io = cfg->can_rx_pin;
-    console_uart_cfg = cfg->console_uart;
+    console_cfg = cfg->console;
 
     initialize_nvs();
 
@@ -445,7 +445,7 @@ esp_err_t epos_initialize(const epos_init_cfg_t *cfg)
     xTaskCreatePinnedToCore(epos_receive_task, "receive",   4096, NULL,  8, NULL, tskNO_AFFINITY);
     xTaskCreatePinnedToCore(epos_transmit_task, "transmit", 4096, NULL,  9, NULL, tskNO_AFFINITY);
     if (cfg->enable_console)
-        xTaskCreatePinnedToCore(epos_console_task, "console",   4096, &console_uart_cfg, 10, NULL, tskNO_AFFINITY);
+        xTaskCreatePinnedToCore(epos_console_task, "console",   4096, &console_cfg, 10, NULL, tskNO_AFFINITY);
     return ESP_OK;
 }
 
