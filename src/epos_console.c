@@ -547,7 +547,7 @@ static int cmd_about(int argc, char **argv)
     return 0;
 }
 
-static void epos_console_register_commands() 
+void epos_console_register_commands() 
 {
     read_args.index = arg_int1(NULL, NULL, "<index>", "Object index (16bit)");
     read_args.subindex = arg_int1(NULL, NULL, "<subindex>", "Object subindex (8bit)");
@@ -729,7 +729,6 @@ static void epos_initialize_console(const epos_console_cfg_t* cfg)
         linenoiseSetDumbMode(1);
     }
 
-    epos_console_register_commands();
 }
 
 

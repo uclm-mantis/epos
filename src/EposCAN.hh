@@ -17,6 +17,7 @@
 */
 
 #include "epos.h"
+#include "epos_console.h"
 #include "epos_motor.h"
 #include "epos_motor_console.h"
 #include "esp_debug_helpers.h"

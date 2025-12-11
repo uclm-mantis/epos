@@ -44,6 +44,7 @@ void print_result_value(object_dictionary_entry_t* obj, object_value_t* value);
 void print_result_ok(void);
 void print_result_error(const char *msg);
 object_dictionary_entry_t* get_dictionary_entry(const char* sym, const char* datatype);
+void epos_console_register_commands(void);
 
 #ifdef __cplusplus
 }

@@ -6,6 +6,7 @@ void EPOS::CAN::begin(bool activate_console) {
     cfg.enable_console = activate_console;
     cfg.can_tx_pin = _tx;
     cfg.can_rx_pin = _rx;
+    epos_console_register_commands();
     motor_register_commands();
     epos_initialize(&cfg);
 }
