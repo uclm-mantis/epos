@@ -305,7 +305,6 @@ motor_halt(Motor_t* self)
 esp_err_t 
 motor_profile_velocity_move(Motor_t* self, int32_t target_velocity)
 {
-    ESP_RETURN_ON_ERROR(set_target_velocity(self->node, target_velocity), TAG, "Unable to set target velocity %ld", target_velocity);
     if (self->mode != PROFILE_VELOCITY_MODE) {
         ESP_RETURN_ON_ERROR(set_modes_of_operation(self->node, PROFILE_VELOCITY_MODE), TAG, "Unable to set PPM");
         self->mode = PROFILE_VELOCITY_MODE;
@@ -313,6 +312,8 @@ motor_profile_velocity_move(Motor_t* self, int32_t target_velocity)
     // quita halt si estuviera
     ControlWord_t cw = { .enable_voltage = 1, .quickstop = 1, .switch_on = 1, .enable_operation = 1 };
     ESP_RETURN_ON_ERROR(set_controlword(self->node, cw.value), TAG, "Unable to write CW");
+    ESP_RETURN_ON_ERROR(motor_wait_operation_enable(self), TAG, "Failed to enable operation");
+    ESP_RETURN_ON_ERROR(set_target_velocity(self->node, target_velocity), TAG, "Unable to set target velocity %ld", target_velocity);
     return ESP_OK;
 }
 
