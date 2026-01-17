@@ -687,8 +687,10 @@ static void epos_initialize_console(const epos_console_cfg_t* cfg)
     // ---- CONFIGURAR DISPOSITIVO DE CONSOLA SOBRE USB SERIAL/JTAG ----
     // Equivalente a la rama USB-SJTAG del ejemplo console/advanced
 
-    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_LF);
-    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_LF);
+    // Fin de línea que llega del monitor (idf.py monitor manda CR al pulsar Enter)
+    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
+    // Cómo queremos que se envíen los \n
+    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
 
     // Modo bloqueante en stdin/stdout (importante para linenoise)
     fcntl(fileno(stdout), F_SETFL, 0);
