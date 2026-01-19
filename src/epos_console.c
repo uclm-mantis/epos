@@ -21,6 +21,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 
 static const char *TAG = "cia309";
 
@@ -744,7 +745,7 @@ void epos_console_task(void *arg)
     }
     epos_initialize_console(cfg);
     for(;;) {
-        char* line = linenoise("> ");
+        char* line = linenoise(CONFIG_EPOS_CONSOLE_PROMPT);
         if (line == NULL) continue;
         if (strlen(line) > 0) {
             linenoiseHistoryAdd(line);
@@ -804,7 +805,7 @@ void tcp_console_task(void *arg)
     ESP_LOGI(TAG, "Client connected");
 
     // Enviar un prompt inicial al cliente
-    send(client_sock, "> ", strlen("> "), 0);
+    send(client_sock, CONFIG_EPOS_CONSOLE_PROMPT, strlen(CONFIG_EPOS_CONSOLE_PROMPT), 0);
 
     // Bucle principal: leer datos del cliente y procesarlos
     while (1) {
@@ -831,7 +832,7 @@ void tcp_console_task(void *arg)
             epos_console_run(rx_buffer);
         }
         // Enviar nuevamente el prompt al cliente
-        send(client_sock, "> ", strlen("> "), 0);
+        send(client_sock, CONFIG_EPOS_CONSOLE_PROMPT, strlen(CONFIG_EPOS_CONSOLE_PROMPT), 0);
     }
 
     // Cerrar conexiones y liberar recursos

@@ -1,0 +1,11 @@
+menu "EPOS CAN Configuration"
+
+    menu "EPOS Console UART configuration"
+    config EPOS_CONSOLE_PROMPT
+        string "Prompt used in interactive console"
+        default "> "
+        help
+            Prompt used in interactive console to show willingness to receive commands.
+    endmenu
+
+endmenu
