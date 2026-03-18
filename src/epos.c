@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "freertos/queue.h"
-#include "freertos/semphr.h"
 #include "esp_err.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -27,6 +26,7 @@ struct request_s {
     twai_message_t* msg;
     uint8_t* value;
     size_t size;
+    TaskHandle_t waiter;
 };
 
 struct response_s {
@@ -34,6 +34,7 @@ struct response_s {
     uint32_t cobid;
     uint8_t* value;
     size_t size;
+    TaskHandle_t waiter;
 };
 
 static const char* TAG = "EPOS";
@@ -42,9 +43,8 @@ bool enable_dump_msg = false;
 
 static QueueHandle_t tx_task_queue;
 static QueueHandle_t rx_task_queue;
-static SemaphoreHandle_t sdo_sem;
-static SemaphoreHandle_t nmt_sem;
-static SemaphoreHandle_t done_sem;
+static TaskHandle_t done_waiter_task = NULL;
+static bool done_requested = false;
 
 static void dump_msg(const char* info, twai_message_t* msg)
 {
@@ -142,14 +142,14 @@ static void sdo_download_response(response_t* self, twai_message_t* msg)
     if (resp->scs != SDO_SCS_DOWNLOAD) {
         dump_msg("Wrong response code", msg);
     }
-    xSemaphoreGive(sdo_sem); // debería ejecutarse solo en el último segmento+
+    xTaskNotifyGive(self->waiter); // debería ejecutarse solo en el último segmento+
 }
 
 static void sdo_download_segment_response(response_t* self, twai_message_t* msg);
 
 static void sdo_download_segment_request(request_t* self) 
 {
-    response_t resp = { .run = sdo_download_segment_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value, .size = self->size };
+    response_t resp = { .run = sdo_download_segment_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value, .size = self->size, .waiter = self->waiter };
     xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
     dump_msg("Tx Seg", self->msg);
     twai_transmit(self->msg, portMAX_DELAY);
@@ -168,11 +168,11 @@ static void sdo_download_segment_response(response_t* self, twai_message_t* msg)
                                                  .t = (resp->scs != SDO_SCS_DOWNLOAD && !resp->t), // not first segment and not previous toggle bit
                                                  .c = (n == self->size) };
         memcpy(req_payload->seg_data, self->value, n);
-        request_t req = { .run = sdo_download_segment_request, .msg = &req_msg, .value = self->value + n, .size = self->size - n };
+        request_t req = { .run = sdo_download_segment_request, .msg = &req_msg, .value = self->value + n, .size = self->size - n, .waiter = self->waiter };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     }
     else { // confirmation of last segment
-        xSemaphoreGive(sdo_sem);
+        xTaskNotifyGive(self->waiter);
     }
 }
 
@@ -180,11 +180,11 @@ static void sdo_download_request(request_t* self)
 {
     SDO_download_req_t* payload = (SDO_download_req_t*) self->msg->data;
     if (payload->e) { // expedited
-        response_t resp = { .run =  sdo_download_response, .cobid = self->msg->identifier - 0x600 + 0x580 };
+        response_t resp = { .run =  sdo_download_response, .cobid = self->msg->identifier - 0x600 + 0x580, .waiter = self->waiter };
         xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
     }
     else {
-        response_t resp = { .run =  sdo_download_segment_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value, .size = self->size };
+        response_t resp = { .run =  sdo_download_segment_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value, .size = self->size, .waiter = self->waiter };
         xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
     }
     dump_msg("Transmit", self->msg);
@@ -203,9 +203,11 @@ esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void* valu
     else { // must be segmented
         *payload = (SDO_download_req_t){ .s = 1, .e = 0, .n = 0, .x = 0, .ccs = SDO_CCS_DOWNLOAD, .index = index, .subindex = subindex, .dsize = size };
     }
-    request_t req = { .run = sdo_download_request, .msg = &msg, .value = value };
+    TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
+    (void) ulTaskNotifyTake(pdTRUE, 0);   // limpiar notificación previa
+    request_t req = { .run = sdo_download_request, .msg = &msg, .value = value, .waiter = waiter };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
-    if (xSemaphoreTake(sdo_sem, maxDelay) != pdTRUE) {
+    if (ulTaskNotifyTake(pdTRUE, maxDelay) != pdTRUE) {
         response_t resp;
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
         xQueueReceive(rx_task_queue, &resp, portMAX_DELAY); // remove request
@@ -233,21 +235,21 @@ static void sdo_upload_segment_response(response_t* self, twai_message_t* msg)
     size_t n = 7 - payload->n;
     memcpy(self->value, payload->seg_data, n);
     if (payload->c) {
-        xSemaphoreGive(sdo_sem);
+        xTaskNotifyGive(self->waiter);
     }
     else {
         static twai_message_t req_msg;
         req_msg = (twai_message_t) { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
         SDO_upload_seq_req_t* req_payload = (SDO_upload_seq_req_t*) req_msg.data;
         *req_payload = (SDO_upload_seq_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD_SEG, .t = !payload->t, .reserved = {0} };
-        request_t req = { .run = sdo_upload_segment_request, .msg = &req_msg, .value = self->value + n };
+        request_t req = { .run = sdo_upload_segment_request, .msg = &req_msg, .value = self->value + n, .waiter = self->waiter };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     }
 }
 
 static void sdo_upload_segment_request(request_t* self) 
 {
-    response_t resp = { .run = sdo_upload_segment_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value };
+    response_t resp = { .run = sdo_upload_segment_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value, .waiter = self->waiter };
     xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
     dump_msg("Tx Seg", self->msg);
     twai_transmit(self->msg, portMAX_DELAY);
@@ -261,21 +263,21 @@ static void sdo_upload_response(response_t* self, twai_message_t* msg)
     if (n > 0)
         memcpy(self->value, payload->d, 4 - payload->n);
     if (payload->e) {
-        xSemaphoreGive(sdo_sem);
+        xTaskNotifyGive(self->waiter);
     }
     else {
         static twai_message_t req_msg;
         req_msg = (twai_message_t){ .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
         SDO_upload_seq_req_t* payload = (SDO_upload_seq_req_t*) req_msg.data;
         *payload = (SDO_upload_seq_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD_SEG, .t = 0, .reserved = {0} };
-        request_t req = { .run = sdo_upload_segment_request, .msg = &req_msg, .value =self->value + n };
+        request_t req = { .run = sdo_upload_segment_request, .msg = &req_msg, .value = self->value + n, .waiter = self->waiter };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     }
 }
 
 static void sdo_upload_request(request_t* self) 
 {
-    response_t resp = { .run = sdo_upload_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value };
+    response_t resp = { .run = sdo_upload_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value, .waiter = self->waiter };
     xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
     dump_msg("Transmit", self->msg);
     twai_transmit(self->msg, portMAX_DELAY);
@@ -288,9 +290,11 @@ esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void* ret)
     SDO_upload_req_t* payload = (SDO_upload_req_t*) msg.data;
     *payload = (SDO_upload_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD, .index = index, .subindex = subindex, .reserved = {0} };
 
-    request_t req = { .run = sdo_upload_request, .msg = &msg, .value = ret };
+    TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
+    (void) ulTaskNotifyTake(pdTRUE, 0);   // limpiar notificación previa
+    request_t req = { .run = sdo_upload_request, .msg = &msg, .value = ret, .waiter = waiter };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
-    if (xSemaphoreTake(sdo_sem, maxDelay) != pdTRUE) {
+    if (ulTaskNotifyTake(pdTRUE, maxDelay) != pdTRUE) {
         response_t resp;
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
         xQueueReceive(rx_task_queue, &resp, portMAX_DELAY); // remove request
@@ -322,15 +326,17 @@ static void nmt_request(request_t* self)
 {
     dump_msg("Transmit", self->msg);
     twai_transmit(self->msg, portMAX_DELAY);
-    xSemaphoreGive(nmt_sem);
+    xTaskNotifyGive(self->waiter);
 }
 
 esp_err_t nmt(uint8_t cs, uint8_t n) 
 {
     twai_message_t msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = 0, .data_length_code = 2, .data = { cs, n, 0, 0 } };
-    request_t req = { .run = nmt_request, .msg = &msg };
+    TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
+    (void) ulTaskNotifyTake(pdTRUE, 0);   // limpiar notificación previa
+    request_t req = { .run = nmt_request, .msg = &msg, .waiter = waiter };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
-    if (xSemaphoreTake(nmt_sem, maxDelay) != pdTRUE) {
+    if (ulTaskNotifyTake(pdTRUE, maxDelay) != pdTRUE) {
         ESP_LOGI(TAG, "Sender thread is blocked, unable to transmit NMT request");
         return ESP_FAIL;
     }
@@ -365,8 +371,11 @@ void epos_done()
     response_t resp = { .run = &epos_resp_done_run };
     xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
 
-    xSemaphoreGive(done_sem);
-    vTaskDelete(NULL); // exit calling task
+    done_requested = true;
+    if (done_waiter_task != NULL) {
+        xTaskNotifyGive(done_waiter_task);
+    }
+    vTaskDelete(NULL);
 }
 
 
@@ -437,10 +446,9 @@ esp_err_t epos_initialize(const epos_init_cfg_t *cfg)
 
     tx_task_queue = xQueueCreate(1, sizeof(request_t));
     rx_task_queue = xQueueCreate(1, sizeof(response_t));
- 
-    sdo_sem = xSemaphoreCreateBinary();
-    nmt_sem = xSemaphoreCreateBinary();
-    done_sem = xSemaphoreCreateBinary();
+
+    done_requested = false;
+    done_waiter_task = NULL;
 
     xTaskCreatePinnedToCore(epos_receive_task, "receive",   4096, NULL,  8, NULL, tskNO_AFFINITY);
     xTaskCreatePinnedToCore(epos_transmit_task, "transmit", 4096, NULL,  9, NULL, tskNO_AFFINITY);
@@ -451,23 +459,26 @@ esp_err_t epos_initialize(const epos_init_cfg_t *cfg)
 
 esp_err_t epos_wait_done()
 {
-    xSemaphoreTake(done_sem, portMAX_DELAY);
+    done_waiter_task = xTaskGetCurrentTaskHandle();
+    (void) ulTaskNotifyTake(pdTRUE, 0);
+
+    if (!done_requested) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    }
 
     ESP_RETURN_ON_ERROR(twai_stop(), TAG, "Unable to stop TWAI");
     ESP_RETURN_ON_ERROR(twai_driver_uninstall(), TAG, "Unable to uninstall TWAI driver");
 
     vQueueDelete(rx_task_queue);
     vQueueDelete(tx_task_queue);
-    vSemaphoreDelete(sdo_sem);
-    vSemaphoreDelete(nmt_sem);
-    vSemaphoreDelete(done_sem);
     return ESP_OK;
 }
 
 
 typedef struct {
     uint32_t cobid;
-    SemaphoreHandle_t semaphore;
+    TaskHandle_t waiter;
+    void* ret;
     bool in_use;
 } cobid_entry_t;
 
@@ -485,37 +496,47 @@ static cobid_entry_t cobid_table[] = {
 };
 
 
-static void epos_signal_cobid(uint32_t cobid, void* data, void* ret) 
+static void epos_signal_cobid(uint32_t cobid, void* data, void* context)
 {
+    (void) context;
+
     for (int i = 0; i < N_ELEMS(cobid_table); i++) {
         if (cobid_table[i].in_use && cobid_table[i].cobid == cobid) {
-            if (ret) memcpy(ret, data, 8); // copy CANopen payload
-            xSemaphoreGive(cobid_table[i].semaphore);
+            if (cobid_table[i].ret) {
+                memcpy(cobid_table[i].ret, data, 8); // copy CANopen payload
+            }
+            TaskHandle_t waiter = cobid_table[i].waiter;
             cobid_table[i].in_use = false;
+            cobid_table[i].waiter = NULL;
+            cobid_table[i].ret = NULL;
+            xTaskNotifyGive(waiter);
             return;
         }
     }
 }
 
-esp_err_t epos_wait_until(uint32_t cobid, void* ret) 
+esp_err_t epos_wait_until(uint32_t cobid, void* ret)
 {
+    TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
+    (void) ulTaskNotifyTake(pdTRUE, 0);
+
     for (int i = 0; i < N_ELEMS(cobid_table); ++i) {
         if (!cobid_table[i].in_use) {
-            if (cobid_table[i].semaphore == NULL) {
-                cobid_table[i].semaphore = xSemaphoreCreateBinary();
-                if (cobid_table[i].semaphore == NULL) {
-                    ESP_LOGE(TAG, "Failed to create semaphore for COB-ID %08x", (unsigned)cobid);
-                    return ESP_ERR_NO_MEM;
-                }
-            }
             cobid_table[i].cobid = cobid;
+            cobid_table[i].waiter = waiter;
+            cobid_table[i].ret = ret;
             cobid_table[i].in_use = true;
 
-            epos_register_canopen_handler(cobid, epos_signal_cobid, ret);
-            BaseType_t done = xSemaphoreTake(cobid_table[i].semaphore, maxDelay);
+            epos_register_canopen_handler(cobid, epos_signal_cobid, NULL);
+            BaseType_t done = ulTaskNotifyTake(pdTRUE, maxDelay);
             epos_unregister_canopen_handler(cobid);
 
             if (done) return ESP_OK;
+
+            cobid_table[i].in_use = false;
+            cobid_table[i].waiter = NULL;
+            cobid_table[i].ret = NULL;
+
             ESP_LOGE(TAG, "Timeout waiting for COB-ID %08x", (unsigned)cobid);
             return ESP_ERR_TIMEOUT;
         }
