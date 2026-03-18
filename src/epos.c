@@ -23,7 +23,7 @@ typedef void (*run_rx_fn_t) (response_t* self, twai_message_t* msg);
 
 struct request_s {
     run_tx_fn_t run;
-    twai_message_t* msg;
+    twai_message_t msg;
     uint8_t* value;
     size_t size;
     TaskHandle_t waiter;
@@ -42,7 +42,8 @@ TickType_t maxDelay = pdMS_TO_TICKS(3000);
 bool enable_dump_msg = false;
 
 static QueueHandle_t tx_task_queue;
-static QueueHandle_t rx_task_queue;
+static bool has_pending_resp = false;
+static response_t current_resp;
 static TaskHandle_t done_waiter_task = NULL;
 static bool done_requested = false;
 
@@ -150,7 +151,8 @@ static void sdo_download_segment_response(response_t* self, twai_message_t* msg)
 static void sdo_download_segment_request(request_t* self) 
 {
     response_t resp = { .run = sdo_download_segment_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value, .size = self->size, .waiter = self->waiter };
-    xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
+    current_resp = resp;
+    has_pending_resp = true;
     dump_msg("Tx Seg", self->msg);
     twai_transmit(self->msg, portMAX_DELAY);
 }
@@ -158,8 +160,7 @@ static void sdo_download_segment_request(request_t* self)
 static void sdo_download_segment_response(response_t* self, twai_message_t* msg) 
 {
     dump_msg("Rx Seg", msg);
-    static twai_message_t req_msg;
-    req_msg = (twai_message_t) { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
+    twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
     if (self->size > 0) { // more segments remaining
         SDO_download_seg_resp_t* resp = (SDO_download_seg_resp_t*) msg->data;
         SDO_download_seg_req_t* req_payload = (SDO_download_seg_req_t*) req_msg.data;
@@ -168,7 +169,7 @@ static void sdo_download_segment_response(response_t* self, twai_message_t* msg)
                                                  .t = (resp->scs != SDO_SCS_DOWNLOAD && !resp->t), // not first segment and not previous toggle bit
                                                  .c = (n == self->size) };
         memcpy(req_payload->seg_data, self->value, n);
-        request_t req = { .run = sdo_download_segment_request, .msg = &req_msg, .value = self->value + n, .size = self->size - n, .waiter = self->waiter };
+        request_t req = { .run = sdo_download_segment_request, .msg = req_msg, .value = self->value + n, .size = self->size - n, .waiter = self->waiter };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     }
     else { // confirmation of last segment
@@ -181,11 +182,13 @@ static void sdo_download_request(request_t* self)
     SDO_download_req_t* payload = (SDO_download_req_t*) self->msg->data;
     if (payload->e) { // expedited
         response_t resp = { .run =  sdo_download_response, .cobid = self->msg->identifier - 0x600 + 0x580, .waiter = self->waiter };
-        xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
+        current_resp = resp;
+        has_pending_resp = true;    
     }
     else {
         response_t resp = { .run =  sdo_download_segment_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value, .size = self->size, .waiter = self->waiter };
-        xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
+        current_resp = resp;
+        has_pending_resp = true;    
     }
     dump_msg("Transmit", self->msg);
     twai_transmit(self->msg, portMAX_DELAY);
@@ -193,8 +196,7 @@ static void sdo_download_request(request_t* self)
 
 esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void* value, size_t size) 
 {
-    static twai_message_t msg;
-    msg = (twai_message_t){ .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = id, .data_length_code = 8 };
+    twai_message_t msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = id, .data_length_code = 8 };
     SDO_download_req_t* payload = (SDO_download_req_t*) msg.data;
     if (size <= 4) { // may be expedited
         *payload = (SDO_download_req_t){ .s = 1, .e = 1, .n = 4 - size, .x = 0, .ccs = SDO_CCS_DOWNLOAD, .index = index, .subindex = subindex};
@@ -205,12 +207,10 @@ esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void* valu
     }
     TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
     (void) ulTaskNotifyTake(pdTRUE, 0);   // limpiar notificación previa
-    request_t req = { .run = sdo_download_request, .msg = &msg, .value = value, .waiter = waiter };
+    request_t req = { .run = sdo_download_request, .msg = msg, .value = value, .size = size, .waiter = waiter };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     if (ulTaskNotifyTake(pdTRUE, maxDelay) != pdTRUE) {
-        response_t resp;
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
-        xQueueReceive(rx_task_queue, &resp, portMAX_DELAY); // remove request
         return ESP_FAIL;
     }
     return ESP_OK;
@@ -238,11 +238,10 @@ static void sdo_upload_segment_response(response_t* self, twai_message_t* msg)
         xTaskNotifyGive(self->waiter);
     }
     else {
-        static twai_message_t req_msg;
-        req_msg = (twai_message_t) { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
+        twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
         SDO_upload_seq_req_t* req_payload = (SDO_upload_seq_req_t*) req_msg.data;
         *req_payload = (SDO_upload_seq_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD_SEG, .t = !payload->t, .reserved = {0} };
-        request_t req = { .run = sdo_upload_segment_request, .msg = &req_msg, .value = self->value + n, .waiter = self->waiter };
+        request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .waiter = self->waiter };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     }
 }
@@ -250,7 +249,8 @@ static void sdo_upload_segment_response(response_t* self, twai_message_t* msg)
 static void sdo_upload_segment_request(request_t* self) 
 {
     response_t resp = { .run = sdo_upload_segment_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value, .waiter = self->waiter };
-    xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
+    current_resp = resp;
+    has_pending_resp = true;
     dump_msg("Tx Seg", self->msg);
     twai_transmit(self->msg, portMAX_DELAY);
 }
@@ -266,11 +266,10 @@ static void sdo_upload_response(response_t* self, twai_message_t* msg)
         xTaskNotifyGive(self->waiter);
     }
     else {
-        static twai_message_t req_msg;
-        req_msg = (twai_message_t){ .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
+        twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
         SDO_upload_seq_req_t* payload = (SDO_upload_seq_req_t*) req_msg.data;
         *payload = (SDO_upload_seq_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD_SEG, .t = 0, .reserved = {0} };
-        request_t req = { .run = sdo_upload_segment_request, .msg = &req_msg, .value = self->value + n, .waiter = self->waiter };
+        request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .waiter = self->waiter };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     }
 }
@@ -278,26 +277,24 @@ static void sdo_upload_response(response_t* self, twai_message_t* msg)
 static void sdo_upload_request(request_t* self) 
 {
     response_t resp = { .run = sdo_upload_response, .cobid = self->msg->identifier - 0x600 + 0x580, .value = self->value, .waiter = self->waiter };
-    xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
+    current_resp = resp;
+    has_pending_resp = true;
     dump_msg("Transmit", self->msg);
     twai_transmit(self->msg, portMAX_DELAY);
 }
 
 esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void* ret) 
 {
-    static twai_message_t msg;
-    msg = (twai_message_t) { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = id, .data_length_code = 8 };
+    twai_message_t msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = id, .data_length_code = 8 };
     SDO_upload_req_t* payload = (SDO_upload_req_t*) msg.data;
     *payload = (SDO_upload_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD, .index = index, .subindex = subindex, .reserved = {0} };
 
     TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
     (void) ulTaskNotifyTake(pdTRUE, 0);   // limpiar notificación previa
-    request_t req = { .run = sdo_upload_request, .msg = &msg, .value = ret, .waiter = waiter };
+    request_t req = { .run = sdo_upload_request, .msg = msg, .value = ret, .waiter = waiter };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     if (ulTaskNotifyTake(pdTRUE, maxDelay) != pdTRUE) {
-        response_t resp;
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
-        xQueueReceive(rx_task_queue, &resp, portMAX_DELAY); // remove request
         return ESP_FAIL;
    }
    return ESP_OK;
@@ -334,7 +331,7 @@ esp_err_t nmt(uint8_t cs, uint8_t n)
     twai_message_t msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = 0, .data_length_code = 2, .data = { cs, n, 0, 0 } };
     TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
     (void) ulTaskNotifyTake(pdTRUE, 0);   // limpiar notificación previa
-    request_t req = { .run = nmt_request, .msg = &msg, .waiter = waiter };
+    request_t req = { .run = nmt_request, .msg = msg, .waiter = waiter };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     if (ulTaskNotifyTake(pdTRUE, maxDelay) != pdTRUE) {
         ESP_LOGI(TAG, "Sender thread is blocked, unable to transmit NMT request");
@@ -369,7 +366,8 @@ void epos_done()
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
 
     response_t resp = { .run = &epos_resp_done_run };
-    xQueueSend(rx_task_queue, &resp, portMAX_DELAY);
+    current_resp = resp;
+    has_pending_resp = true;
 
     done_requested = true;
     if (done_waiter_task != NULL) {
@@ -394,14 +392,10 @@ static void epos_receive_task(void *arg)
     static twai_message_t msg;
     for (;;) {
         if (ESP_OK != twai_receive(&msg, maxDelay)) continue;
-        response_t resp; // si hay petición pendiente, atender
-        if (xQueuePeek(rx_task_queue, &resp, 0) == pdTRUE) {
-            if (msg.identifier == resp.cobid) {
-                if (xQueueReceive(rx_task_queue, &resp, 0) != pdTRUE)
-                    ESP_LOGE(TAG, "RX queue was empty after successful peek!");
-                resp.run(&resp, &msg);
-                continue;
-            }
+        if (has_pending_resp && msg.identifier == current_resp.cobid) {
+            has_pending_resp = false;
+            current_resp.run(&current_resp, &msg);
+            continue;
         }
         epos_receive_canopen(&msg);
     }
@@ -445,7 +439,6 @@ esp_err_t epos_initialize(const epos_init_cfg_t *cfg)
     ESP_RETURN_ON_ERROR(twai_start(), TAG, "Unable to start TWAI");
 
     tx_task_queue = xQueueCreate(1, sizeof(request_t));
-    rx_task_queue = xQueueCreate(1, sizeof(response_t));
 
     done_requested = false;
     done_waiter_task = NULL;
@@ -469,7 +462,6 @@ esp_err_t epos_wait_done()
     ESP_RETURN_ON_ERROR(twai_stop(), TAG, "Unable to stop TWAI");
     ESP_RETURN_ON_ERROR(twai_driver_uninstall(), TAG, "Unable to uninstall TWAI driver");
 
-    vQueueDelete(rx_task_queue);
     vQueueDelete(tx_task_queue);
     return ESP_OK;
 }
