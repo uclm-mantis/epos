@@ -225,13 +225,15 @@ def write_csv(rows, out_path: Path):
 def main():
     ap = argparse.ArgumentParser(description="Genera od.csv a partir de una EDS de CANopen (maxon compatible)")
     ap.add_argument("eds", help="archivo .eds de entrada")
-    ap.add_argument("-o", "--output", default="od.csv", help="CSV de salida")
+    ap.add_argument("-o", "--output", default=None, help="CSV de salida (por defecto igual al EDS con extensión .csv)")
     args = ap.parse_args()
 
     cfg = parse_eds(Path(args.eds))
     rows = eds_to_rows(cfg)
-    write_csv(rows, Path(args.output))
-    print(f"[+] Generado {args.output} con {len(rows)} objetos")
+
+    out_path = Path(args.output) if args.output else Path(args.eds).with_suffix('.csv')
+    write_csv(rows, out_path)
+    print(f"[+] Generado {out_path} con {len(rows)} objetos")
 
 
 if __name__ == "__main__":

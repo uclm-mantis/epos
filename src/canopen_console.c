@@ -12,8 +12,9 @@
 #include "esp_check.h"
 #include "argtable3/argtable3.h"
 #include "linenoise/linenoise.h"
-#include "epos.h"
-#include "epos_console.h"
+#include "canopen.h"
+#include "canopen_client.h"
+#include "canopen_console.h"
 #include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -548,7 +549,7 @@ static int cmd_about(int argc, char **argv)
     return 0;
 }
 
-void epos_console_register_commands() 
+void canopen_console_register_commands() 
 {
     read_args.index = arg_int1(NULL, NULL, "<index>", "Object index (16bit)");
     read_args.subindex = arg_int1(NULL, NULL, "<subindex>", "Object subindex (8bit)");
@@ -604,7 +605,7 @@ void epos_console_register_commands()
     ESP_ERROR_CHECK(esp_console_register_help_command());
 }
 
-static void epos_console_run(char* line)
+static void canopen_console_run(char* line)
 {
     // inherits default context
     ctx = default_ctx;
@@ -677,7 +678,7 @@ static void completion_callback(const char *buf, linenoiseCompletions *lc)
     }
 }
 
-static void epos_initialize_console(const epos_console_cfg_t* cfg)
+static void canopen_initialize_console(const canopen_console_cfg_t* cfg)
 {
     // En USB-SJTAG el cfg sólo lo usaremos para tamaños de buffer y tal.
     if (cfg == NULL) return;
@@ -734,22 +735,22 @@ static void epos_initialize_console(const epos_console_cfg_t* cfg)
 
 
 
-void epos_console_task(void *arg)
+void canopen_console_task(void *arg)
 {
-    const epos_console_cfg_t* cfg = (const epos_console_cfg_t*)arg;
+    const canopen_console_cfg_t* cfg = (const canopen_console_cfg_t*)arg;
     if (cfg == NULL) {
         printf("\n"
                "No hay config, usando default.\n");
-        static epos_console_cfg_t fallback_cfg = EPOS_CONSOLE_DEFAULT();
+        static canopen_console_cfg_t fallback_cfg = CANOPEN_CONSOLE_DEFAULT();
         cfg = &fallback_cfg;
     }
-    epos_initialize_console(cfg);
+    canopen_initialize_console(cfg);
     for(;;) {
         char* line = linenoise(CONFIG_EPOS_CONSOLE_PROMPT);
         if (line == NULL) continue;
         if (strlen(line) > 0) {
             linenoiseHistoryAdd(line);
-            epos_console_run(line);
+            canopen_console_run(line);
         }
         linenoiseFree(line);
     }
@@ -829,7 +830,7 @@ void tcp_console_task(void *arg)
         // Procesar el comando si no está vacío
         if (strlen(rx_buffer) > 0) {
             // Aquí podrías agregar el comando a un historial si fuera necesario
-            epos_console_run(rx_buffer);
+            canopen_console_run(rx_buffer);
         }
         // Enviar nuevamente el prompt al cliente
         send(client_sock, CONFIG_EPOS_CONSOLE_PROMPT, strlen(CONFIG_EPOS_CONSOLE_PROMPT), 0);
