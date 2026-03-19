@@ -61,9 +61,12 @@ esp_err_t epos_initialize(const epos_init_cfg_t *cfg);
 esp_err_t epos_wait_done(void);
 esp_err_t epos_wait_until(uint32_t cobid, void* ret);
 
-typedef void (*canopen_handler_fn)(uint32_t cobid, void* msg, void* context);
-esp_err_t epos_register_canopen_handler(uint32_t cobid, canopen_handler_fn handler_fn, void* context);
-esp_err_t epos_unregister_canopen_handler(uint32_t cobid);
+typedef struct canopen_handler_entry* epos_canopen_handler_handle_t;
+esp_err_t epos_register_canopen_handler(uint32_t cobid,
+                                        canopen_handler_fn handler_fn,
+                                        void *context,
+                                        epos_canopen_handler_handle_t *out_handle);
+esp_err_t epos_unregister_canopen_handler(epos_canopen_handler_handle_t handle);
 
 typedef union { char str[4]; uint32_t data; } string4_t; 
 typedef union { char str[8]; uint64_t data; } string8_t; 
