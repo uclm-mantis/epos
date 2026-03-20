@@ -60,9 +60,9 @@ public:
     CAN(gpio_num_t can_tx = (gpio_num_t)DEFAULT_CAN_TX, gpio_num_t can_rx = (gpio_num_t)DEFAULT_CAN_RX): _tx(can_tx), _rx(can_rx) {}
 
     void begin(bool activate_console);
-    void done(void) { epos_done(); epos_wait_done(); }
+    void done(void) { epos_done(); epos_wait_shutdown(); }
 
-    void wait_done(void) { epos_wait_done(); }
+    void wait_done(void) { epos_wait_shutdown(); }
 
     template <typename T>
     void wait_until(uint32_t cobid, T& ret) { epos_wait_until(cobid, &ret); }

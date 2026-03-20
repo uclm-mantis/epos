@@ -56,22 +56,22 @@ extern "C" {
     ( )
 
 #define OBJ(id,sid,d,i,t,rp,tp,r,w) GENERATE_GETTER_DECL(r,id,sid,t)
-#include "object_dictionary.h"
+#include "client_od.h"
 #undef OBJ
 
 #define OBJ(id,sid,d,i,t,rp,tp,r,w) GENERATE_SETTER_DECL(w,id,sid,t)
-#include "object_dictionary.h"
+#include "client_od.h"
 #undef OBJ
 
 typedef enum {
 #define OBJ(id,sid,d,i,t,rp,tp,r,w) GENERATE_MAPPING_OBJECT(tx,tp,i,id,sid,t)
-#include "object_dictionary.h"
+#include "client_od.h"
 #undef OBJ
 } pdo_tx_mapping_object_t;
 
 typedef enum {
 #define OBJ(id,sid,d,i,t,rp,tp,r,w) GENERATE_MAPPING_OBJECT(rx,rp,i,id,sid,t)
-#include "object_dictionary.h"
+#include "client_od.h"
 #undef OBJ
 } pdo_rx_mapping_object_t;
 

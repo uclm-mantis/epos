@@ -24,7 +24,11 @@
 #include "freertos/task.h"
 #include "sdkconfig.h"
 
+#define TCP_PORT 3344  // Puerto conforme a CANopen CiA 309
+
 static const char *TAG = "cia309";
+static TaskHandle_t usb_console_task_handle;
+static TaskHandle_t tcp_console_task_handle;
 
 /*
     CiA 309-3 ASCII console
@@ -39,7 +43,6 @@ static const char *TAG = "cia309";
  */
 
 
-#define TCP_PORT 3344  // Puerto conforme a CANopen CiA 309
 #define N_ELEMS(x) (sizeof(x)/sizeof(x[0]))
 
 static void parse_int64_t(const char* str, void* buf)  { *(int64_t*)buf = strtoll(str, NULL, 0); }
@@ -130,9 +133,9 @@ static console_context_t default_ctx = {
     .sequence = 0,
     .net = 0,
     .node = 0,
-    .sdo_timeout = &maxDelay,
+    .sdo_timeout = 0,
     .sdo_block = false,
-    .dump_msg = &enable_dump_msg,
+    .dump_msg = false,
 };
 
 // command argument tables --------------------------------- 
@@ -423,7 +426,8 @@ static int cmd_set(int argc, char **argv)
     }
     else if (strcasecmp(param, "sdo_timeout") == 0) {
         int val = strtol(val_str, NULL, 0);
-        *default_ctx.sdo_timeout = pdMS_TO_TICKS(val);
+        canopen_max_delay(pdMS_TO_TICKS(val));
+        default_ctx.sdo_timeout = pdMS_TO_TICKS(val);
         print_result_ok();
     }
     else if (strcasecmp(param, "sdo_block") == 0) {
@@ -437,10 +441,12 @@ static int cmd_set(int argc, char **argv)
     }
     else if (strcasecmp(param, "dump") == 0) {
         if (strcmp(val_str, "1") == 0 || strcasecmp(val_str, "true") == 0) {
-            *default_ctx.dump_msg = true;
+            canopen_dump_enabled(true);
+            default_ctx.dump_msg = true;
         }
         else {
-            *default_ctx.dump_msg = false;
+            canopen_dump_enabled(false);
+            default_ctx.dump_msg = false;
         }
         print_result_ok();
     }
@@ -469,10 +475,13 @@ static int cmd_get(int argc, char **argv)
         print_result_int(ctx.node);
     }
     else if (strcasecmp(param, "sdo_timeout") == 0) {
-        print_result_int(pdTICKS_TO_MS(*ctx.sdo_timeout));
+        print_result_int(pdTICKS_TO_MS(canopen_get_max_delay()));
     }
     else if (strcasecmp(param, "sdo_block") == 0) {
         print_result_int(ctx.sdo_block);
+    }
+    else if (strcasecmp(param, "dump") == 0) {
+        print_result_int(canopen_is_dump_enabled());
     }
     else {
         print_result_error("unknown_param");
@@ -484,7 +493,7 @@ static int cmd_get(int argc, char **argv)
 
 static int cmd_exit(int argc, char **argv)
 {
-    epos_done();
+    epos_request_shutdown();
     // not reached
     return 0;
 }
@@ -505,7 +514,7 @@ static int cmd_about(int argc, char **argv)
                 "  Mantis Research Group\r\n"
                 "  Institute of Applied Research for the Aeronautical Industry\r\n"
                 "  University of Castilla-La Mancha\r\n"
-                "  45071 Toledo, Spain\r\n"
+                "  45005 Toledo, Spain\r\n"
                 "  mantis@on.uclm.es\r\n"
                 "  https://uclm-mantis.github.io/\r\n");
         printf("Available commands:\r\n"
@@ -517,7 +526,7 @@ static int cmd_about(int argc, char **argv)
                 NN "stop\r\n"
                 NN "preop[erational]\r\n"
                 NN "reset node|comm[unication]\r\n"
-                N "set network|node|sdo_timeout|sdo_block <value>\r\n"
+                N "set network|node|sdo_timeout|sdo_block|dump <value>\r\n"
                 "  about [datatype|object|<symbol prefix>]\r\n");
     } else {
         const char *topic = about_args.topic->sval[0];
@@ -573,11 +582,11 @@ void canopen_console_register_commands()
     reset_args.param = arg_str1(NULL, NULL, "<node|communication>", "Entity to be reset");
     reset_args.end = arg_end(1);
 
-    set_args.param = arg_str1(NULL, NULL, "<network|node|sdo_timeout|sdo_block>", "Parameter to set");
+    set_args.param = arg_str1(NULL, NULL, "<network|node|sdo_timeout|sdo_block|dump>", "Parameter to set");
     set_args.value = arg_str1(NULL, NULL, "<value>", "Parameter value");
     set_args.end = arg_end(1);
 
-    get_args.param = arg_str1(NULL, NULL, "<network|node|sdo_timeout|sdo_block>", "Parameter to get");
+    get_args.param = arg_str1(NULL, NULL, "<network|node|sdo_timeout|sdo_block|dump>", "Parameter to get");
     get_args.end = arg_end(1);
 
     about_args.topic = arg_str0(NULL, NULL, "<object|datatype|about|symbol>", "Help topic");
@@ -678,10 +687,17 @@ static void completion_callback(const char *buf, linenoiseCompletions *lc)
     }
 }
 
-static void canopen_initialize_console(const canopen_console_cfg_t* cfg)
+void canopen_console_init(const canopen_console_cfg_t* cfg)
 {
-    // En USB-SJTAG el cfg sólo lo usaremos para tamaños de buffer y tal.
-    if (cfg == NULL) return;
+    // Si cfg es NULL, aplicar configuración por defecto.
+    canopen_console_cfg_t default_cfg = CANOPEN_CONSOLE_DEFAULT();
+    if (cfg == NULL) {
+        cfg = &default_cfg;
+    }
+
+    // Inicializar valores de contexto con valores reales del canopen core.
+    default_ctx.sdo_timeout = canopen_get_max_delay();
+    default_ctx.dump_msg = canopen_is_dump_enabled();
 
     fflush(stdout);
     fsync(fileno(stdout));
@@ -723,28 +739,23 @@ static void canopen_initialize_console(const canopen_console_cfg_t* cfg)
     linenoiseSetMaxLineLen(console_config.max_cmdline_length);
     linenoiseAllowEmpty(false);
 
-    int probe_status = linenoiseProbe();
-    if (probe_status) {
-        printf("\n"
-               "Your terminal application does not support escape sequences.\n"
-               "Line editing disabled.\n");
+    if (cfg->dumb_mode) {
+        ESP_LOGI(TAG, "Dumb mode enabled. Line editing and history features are disabled, but ANSI escape codes will be printed (e.g. colors).");
         linenoiseSetDumbMode(1);
     }
 
-}
+    if (cfg->enable_tcp_console) {
+        xTaskCreatePinnedToCore(tcp_console_task, "tcp_console", 4096, NULL, 8, &tcp_console_task_handle, tskNO_AFFINITY);
+    }
 
+    if (cfg->enable_usb_console) {
+        xTaskCreatePinnedToCore(canopen_console_task, "usb_console", 4096, NULL, 8, &usb_console_task_handle, tskNO_AFFINITY);
+    }
+}
 
 
 void canopen_console_task(void *arg)
 {
-    const canopen_console_cfg_t* cfg = (const canopen_console_cfg_t*)arg;
-    if (cfg == NULL) {
-        printf("\n"
-               "No hay config, usando default.\n");
-        static canopen_console_cfg_t fallback_cfg = CANOPEN_CONSOLE_DEFAULT();
-        cfg = &fallback_cfg;
-    }
-    canopen_initialize_console(cfg);
     for(;;) {
         char* line = linenoise(CONFIG_EPOS_CONSOLE_PROMPT);
         if (line == NULL) continue;
@@ -765,7 +776,6 @@ void tcp_console_task(void *arg)
     socklen_t addr_len = sizeof(client_addr);
     char rx_buffer[128];
 
-    // Crear el socket de escucha
     listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
     if (listen_sock < 0) {
         ESP_LOGE(TAG, "Error socket: %d", errno);
@@ -773,12 +783,10 @@ void tcp_console_task(void *arg)
         return;
     }
 
-    // Configurar la dirección del servidor
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     server_addr.sin_port = htons(TCP_PORT);
 
-    // Asociar el socket a la dirección y puerto
     if (bind(listen_sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         ESP_LOGE(TAG, "Error bind: %d", errno);
         close(listen_sock);
@@ -786,8 +794,8 @@ void tcp_console_task(void *arg)
         return;
     }
 
-    // Escuchar conexiones entrantes (se admite 1 conexión en cola)
-    if (listen(listen_sock, 1) < 0) {
+    // Escuchar conexiones entrantes (se admiten 2 conexiones en cola)
+    if (listen(listen_sock, 2) < 0) {
         ESP_LOGE(TAG, "Error listen: %d", errno);
         close(listen_sock);
         vTaskDelete(NULL);
@@ -805,11 +813,9 @@ void tcp_console_task(void *arg)
     }
     ESP_LOGI(TAG, "Client connected");
 
-    // Enviar un prompt inicial al cliente
-    send(client_sock, CONFIG_EPOS_CONSOLE_PROMPT, strlen(CONFIG_EPOS_CONSOLE_PROMPT), 0);
-
-    // Bucle principal: leer datos del cliente y procesarlos
-    while (1) {
+    for (;;) {
+        send(client_sock, CONFIG_EPOS_CONSOLE_PROMPT, strlen(CONFIG_EPOS_CONSOLE_PROMPT), 0);
+    
         int len = recv(client_sock, rx_buffer, sizeof(rx_buffer) - 1, 0);
         if (len < 0) {
             ESP_LOGE(TAG, "Error recv: %d", errno);
@@ -825,18 +831,12 @@ void tcp_console_task(void *arg)
         char *newline = strchr(rx_buffer, '\n');
         if (newline) {
             *newline = '\0';
+            if (strlen(rx_buffer) > 0) {
+                canopen_console_run(rx_buffer);
+            }
         }
-
-        // Procesar el comando si no está vacío
-        if (strlen(rx_buffer) > 0) {
-            // Aquí podrías agregar el comando a un historial si fuera necesario
-            canopen_console_run(rx_buffer);
-        }
-        // Enviar nuevamente el prompt al cliente
-        send(client_sock, CONFIG_EPOS_CONSOLE_PROMPT, strlen(CONFIG_EPOS_CONSOLE_PROMPT), 0);
     }
 
-    // Cerrar conexiones y liberar recursos
     close(client_sock);
     close(listen_sock);
     vTaskDelete(NULL);

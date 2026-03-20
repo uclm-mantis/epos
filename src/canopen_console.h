@@ -10,20 +10,26 @@ extern "C" {
 typedef struct {
     int rx_buffer_size;
     int tx_buffer_size;
+    bool dumb_mode;
+    bool enable_usb_console;
+    bool enable_tcp_console;
 } canopen_console_cfg_t;
 
 #define CANOPEN_CONSOLE_DEFAULT() { \
     .rx_buffer_size = 256, \
     .tx_buffer_size = 256, \
+    .dumb_mode = false, \
+    .enable_usb_console = true, \
+    .enable_tcp_console = false, \
 }
 
 typedef struct {
     int sequence;
     int net;
     int node;
-    TickType_t* sdo_timeout;
+    TickType_t sdo_timeout;
     bool sdo_block;     // falso por defecto
-    bool* dump_msg;
+    bool dump_msg;
 } console_context_t;
 
 typedef struct {
@@ -56,6 +62,7 @@ void print_result_ok(void);
 void print_result_error(const char *msg);
 object_dictionary_entry_t* get_dictionary_entry(const char* sym, const char* datatype);
 void canopen_console_register_commands(void);
+void canopen_console_init(const canopen_console_cfg_t* cfg);
 
 #ifdef __cplusplus
 }

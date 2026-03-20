@@ -1,11 +1,11 @@
 #include "canopen.h"
-#include "canopen_types.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
-#include "esp_err.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -64,8 +64,8 @@ static canopen_handler_entry_t* canopen_handlers = NULL;
 static SemaphoreHandle_t canopen_handlers_mutex;
 
 static const char* TAG = "CANOPEN";
-TickType_t maxDelay = pdMS_TO_TICKS(3000);
-bool enable_dump_msg = false;
+static TickType_t max_delay = pdMS_TO_TICKS(3000);
+static bool enable_dump_msg = false;
 
 static QueueHandle_t rx_msg_queue;
 static QueueHandle_t tx_task_queue;
@@ -351,7 +351,7 @@ esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void* valu
     (void) ulTaskNotifyTake(pdTRUE, 0);
     request_t req = { .run = sdo_download_request, .msg = msg, .value = value, .size = size, .waiter = waiter };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
-    if (ulTaskNotifyTake(pdTRUE, maxDelay) != pdTRUE) {
+    if (ulTaskNotifyTake(pdTRUE, max_delay) != pdTRUE) {
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
         return ESP_FAIL;
     }
@@ -431,7 +431,7 @@ esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void* ret)
     (void) ulTaskNotifyTake(pdTRUE, 0);
     request_t req = { .run = sdo_upload_request, .msg = msg, .value = ret, .waiter = waiter };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
-    if (ulTaskNotifyTake(pdTRUE, maxDelay) != pdTRUE) {
+    if (ulTaskNotifyTake(pdTRUE, max_delay) != pdTRUE) {
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
         return ESP_FAIL;
    }
@@ -452,23 +452,15 @@ esp_err_t nmt(uint8_t cs, uint8_t n)
     (void) ulTaskNotifyTake(pdTRUE, 0);
     request_t req = { .run = nmt_request, .msg = msg, .waiter = waiter };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
-    if (ulTaskNotifyTake(pdTRUE, maxDelay) != pdTRUE) {
+    if (ulTaskNotifyTake(pdTRUE, max_delay) != pdTRUE) {
         ESP_LOGI(TAG, "Sender thread is blocked, unable to transmit NMT request");
         return ESP_FAIL;
     }
     return ESP_OK;
 }
 
-#define OBJ(id,sid,d,i,t,rp,tp,r,w) GENERATE_GETTER(r,id,sid,t)
-#include "object_dictionary.h"
-#undef OBJ
 
-#define OBJ(id,sid,d,i,t,rp,tp,r,w) GENERATE_SETTER(w,id,sid,t)
-#include "object_dictionary.h"
-#undef OBJ
-
-
-void canopen_done(void)
+void canopen_request_shutdown(void)
 {
     taskENTER_CRITICAL(&done_mux);
     shutdown_requested = true;
@@ -479,6 +471,7 @@ void canopen_done(void)
         xTaskNotifyGive(waiter);
     }
 }
+
 
 static void canopen_transmit_task(void *arg)
 {
@@ -559,6 +552,9 @@ esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
     g_config.tx_io = (gpio_num_t) cfg->can_tx_pin;
     g_config.rx_io = (gpio_num_t) cfg->can_rx_pin;
 
+    max_delay = cfg->max_delay;
+    enable_dump_msg = cfg->enable_dump_msg;
+
     initialize_nvs();
 
     ESP_RETURN_ON_ERROR(twai_driver_install(&g_config, &t_config, &f_config), TAG, "Unable to install TWAI driver");
@@ -581,7 +577,27 @@ esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
     return ESP_OK;
 }
 
-esp_err_t canopen_wait_done(void)
+unsigned canopen_get_max_delay_ms(void)
+{
+    return pdTICKS_TO_MS(max_delay);
+}
+
+void canopen_max_delay_ms(unsigned delay)
+{
+    max_delay = pdMS_TO_TICKS(delay);
+}
+
+bool canopen_is_dump_enabled(void)
+{
+    return enable_dump_msg;
+}
+
+void canopen_dump_enabled(bool enable)
+{
+    enable_dump_msg = enable;
+}
+
+esp_err_t canopen_wait_shutdown(void)
 {
     TaskHandle_t self = xTaskGetCurrentTaskHandle();
     (void) ulTaskNotifyTake(pdTRUE, 0);
@@ -642,6 +658,7 @@ esp_err_t canopen_wait_done(void)
 
     return ESP_OK;
 }
+
 
 typedef struct {
     uint32_t cobid;
@@ -738,7 +755,7 @@ esp_err_t canopen_wait_until(uint32_t cobid, void* ret)
     xSemaphoreGive(cobid_mutex);
     xSemaphoreGive(canopen_handlers_mutex);
 
-    done = ulTaskNotifyTake(pdTRUE, maxDelay);
+    done = ulTaskNotifyTake(pdTRUE, max_delay);
 
     xSemaphoreTake(canopen_handlers_mutex, portMAX_DELAY);
     xSemaphoreTake(cobid_mutex, portMAX_DELAY);

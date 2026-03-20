@@ -1,5 +1,6 @@
 {
     "chat.tools.terminal.autoApprove": {
         "mv": true
-    }
+    },
+    "idf.currentSetup": "C:\\Users\\Francisco.Moya\\esp\\v5.5.1\\esp-idf"
 }
