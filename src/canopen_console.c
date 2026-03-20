@@ -45,43 +45,21 @@ static TaskHandle_t tcp_console_task_handle;
 
 #define N_ELEMS(x) (sizeof(x)/sizeof(x[0]))
 
-static void parse_int64_t(const char* str, void* buf)  { *(int64_t*)buf = strtoll(str, NULL, 0); }
-static void parse_int32_t(const char* str, void* buf)  { *(int32_t*)buf = strtol(str, NULL, 0); }
-#define parse_int16_t parse_int32_t
-#define parse_int8_t parse_int32_t
-static void parse_uint64_t(const char* str, void* buf) { *(uint64_t*)buf = strtoull(str, NULL, 0); }
-static void parse_uint32_t(const char* str, void* buf) { *(uint32_t*)buf = strtoul(str, NULL, 0); }
-#define parse_uint16_t parse_uint32_t
-#define parse_uint8_t parse_uint32_t
-static void parse_string4_t(const char* str, void* buf) { *(uint32_t*)buf = *(uint32_t*)str; }
+// parsers and printers for supported datatypes
+#define CT(datatype, ctype, scan_sfx, print_sfx) \
+static void parse_##ctype(const char* str, void* buf)  { *(ctype*)buf = (ctype)strto##scan_sfx(str, NULL, 0); } \
+static void print_##ctype(void* buf) { printf("%" #print_sfx, *(ctype*)buf); }
+#define CTA(datatype, ctype, scan_sfx, print_sfx) 
+#include "canopen_console_types.h"
 static void parse_string8_t(const char* str, void* buf) { *(uint64_t*)buf = *(uint64_t*)str; }
-
-static void print_int64_t(void* buf)   { printf("%lld", *(int64_t*)buf); }
-static void print_x64_t(void* buf)     { printf("%016llx", *(int64_t*)buf); }
-static void print_int32_t(void* buf)   { printf("%ld", *(int32_t*)buf); }
-static void print_x32_t(void* buf)     { printf("%08lx", *(int32_t*)buf); }
-static void print_int16_t(void* buf)   { printf("%d", *(int16_t*)buf); }
-static void print_x16_t(void* buf)     { printf("%04x", *(int16_t*)buf); }
-static void print_int8_t(void* buf)    { printf("%d", *(int8_t*)buf); }
-static void print_x8_t(void* buf)      { printf("%02x", *(int8_t*)buf); }
-static void print_uint64_t(void* buf)  { printf("%lld", *(int64_t*)buf); }
-static void print_uint32_t(void* buf)  { printf("%ld", *(int32_t*)buf); }
-static void print_uint16_t(void* buf)  { printf("%d", *(int16_t*)buf); }
-static void print_uint8_t(void* buf)   { printf("%d", *(int8_t*)buf); }
-static void print_string4_t(void* buf) { printf("%s", (char*)buf); }
 static void print_string8_t(void* buf) { printf("%s", (char*)buf); }
 
+// type information for console
+#define CT(datatype, ctype, scan_sfx, print_sfx) static const char ctype##_abbr[] = #datatype;
+#define CTS(datatype, ctype) static const char ctype##_abbr[] = #datatype;
+#define CTA(datatype, ctype, scan_sfx, print_sfx)
+#include "canopen_console_types.h"
 #define CiA309type(type) type##_abbr
-#define bool_abbr      "u64"
-#define int8_t_abbr    "i8"
-#define uint8_t_abbr   "u8"
-#define int16_t_abbr   "i16"
-#define uint16_t_abbr  "u16"
-#define int32_t_abbr   "i32"
-#define uint32_t_abbr  "u32"
-#define int64_t_abbr   "i64"
-#define uint64_t_abbr  "u64"
-#define string8_t_abbr "vs"
 
 #define R(o) ((o)->print ? 'R' : '-')
 #define W(o) ((o)->parse ? 'W' : '-')
@@ -97,8 +75,7 @@ static void print_string8_t(void* buf) { printf("%s", (char*)buf); }
 
 object_dictionary_entry_t od[] = {
 #define OBJ(idx,sidx,d,i,t,rp,tp,r,w) { .id = #i, .index = idx, .subindex = sidx, .type = CiA309type(t), .size = sizeof(t), .parse = PARSE_FN(w,t), .print = PRINT_FN(r,t) },
-#include "object_dictionary.h"
-#undef OBJ
+#include "client_od.h"
 };
 
 struct {
@@ -107,20 +84,9 @@ struct {
     void (*parse)(const char* str, void* buf);
     void (*print)(void* buf);
 } by_type[] = {
-    { "b",   1, parse_uint8_t,   print_uint8_t },
-    { "i8",  1, parse_int8_t,    print_int8_t },
-    { "u8",  1, parse_uint8_t,   print_uint8_t },
-    { "x8",  1, parse_uint8_t,   print_x8_t },
-    { "i16", 2, parse_int16_t,   print_int16_t },
-    { "u16", 2, parse_uint16_t,  print_uint16_t },
-    { "x16", 2, parse_uint16_t,  print_x16_t },
-    { "i32", 4, parse_int32_t,   print_int32_t },
-    { "u32", 4, parse_uint32_t,  print_uint32_t },
-    { "x32", 4, parse_uint32_t,  print_x32_t },
-    { "i64", 4, parse_int64_t,   print_int64_t },
-    { "u64", 4, parse_uint64_t,  print_uint64_t },
-    { "x64", 4, parse_uint64_t,  print_x64_t },
-    { "vs",  4, parse_string4_t, print_string4_t },
+#define CT(datatype, ctype, scan_sfx, print_sfx) { #datatype, sizeof(ctype), parse_##ctype, print_##ctype },
+#define CTS(datatype, ctype) { #datatype, sizeof(ctype), parse_##ctype, print_##ctype },
+#include "canopen_console_types.h"
 };
 
 
@@ -284,7 +250,7 @@ static int cmd_read_sym(int argc, char **argv)
         return 1;
     }
     const char *sym = read_sym_args.symbol->sval[0];
-    const char *datatype = read_sym_args.datatype->count > 0 ? read_args.datatype->sval[0] : NULL;
+    const char *datatype = read_sym_args.datatype->count > 0 ? read_sym_args.datatype->sval[0] : NULL;
     object_dictionary_entry_t* obj = get_dictionary_entry(sym, datatype);
     if (obj == NULL) print_result_error("Unknown object");
     else read_object(obj);
@@ -426,8 +392,8 @@ static int cmd_set(int argc, char **argv)
     }
     else if (strcasecmp(param, "sdo_timeout") == 0) {
         int val = strtol(val_str, NULL, 0);
-        canopen_max_delay(pdMS_TO_TICKS(val));
-        default_ctx.sdo_timeout = pdMS_TO_TICKS(val);
+        canopen_max_delay_ms(val);
+        default_ctx.sdo_timeout = canopen_get_max_delay_ms();
         print_result_ok();
     }
     else if (strcasecmp(param, "sdo_block") == 0) {
@@ -475,7 +441,7 @@ static int cmd_get(int argc, char **argv)
         print_result_int(ctx.node);
     }
     else if (strcasecmp(param, "sdo_timeout") == 0) {
-        print_result_int(pdTICKS_TO_MS(canopen_get_max_delay()));
+        print_result_int(canopen_get_max_delay_ms());
     }
     else if (strcasecmp(param, "sdo_block") == 0) {
         print_result_int(ctx.sdo_block);
@@ -493,7 +459,7 @@ static int cmd_get(int argc, char **argv)
 
 static int cmd_exit(int argc, char **argv)
 {
-    epos_request_shutdown();
+    canopen_request_shutdown();
     // not reached
     return 0;
 }
@@ -630,19 +596,26 @@ static void canopen_console_run(char* line)
     }
 
     // 2) [[net] node]
-    if (isdigit((int)line[0])) {
-        int net = strtol(line, NULL, 0);
-        // Intentar siguiente token
-        char* next = strtok(line, " \t");
-        if (next && isdigit((int)next[0])) {
-            ctx.net = net;
-            ctx.node = strtol(next, NULL, 0);
-            line = strtok(NULL, ""); // el resto de la línea
-        } else if (0 == strncmp("set", next, 3)) { 
-            // en set el número es [net]
-            ctx.net = net;
+    if (isdigit((unsigned char)line[0])) {
+        char *end1;
+        long first = strtol(line, &end1, 0);
+        end1 = (char*)trim_spaces(end1);
+
+        if (isdigit((unsigned char)end1[0])) {
+            char *end2;
+            long second = strtol(end1, &end2, 0);
+            ctx.net = (int)first;
+            ctx.node = (int)second;
+            line = (char*)trim_spaces(end2);
+        } else if (strncmp(end1, "set", 3) == 0 &&
+                   (end1[3] == '\0' || isspace((unsigned char)end1[3]))) {
+            // En "set", el prefijo numérico es solo [net]
+            ctx.net = (int)first;
+            line = end1;
         } else {
-            ctx.node = net;
+            // Un único número: [node]
+            ctx.node = (int)first;
+            line = end1;
         }
     }
 
@@ -696,7 +669,7 @@ void canopen_console_init(const canopen_console_cfg_t* cfg)
     }
 
     // Inicializar valores de contexto con valores reales del canopen core.
-    default_ctx.sdo_timeout = canopen_get_max_delay();
+    default_ctx.sdo_timeout = canopen_get_max_delay_ms();
     default_ctx.dump_msg = canopen_is_dump_enabled();
 
     fflush(stdout);
