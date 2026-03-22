@@ -822,3 +822,188 @@ esp_err_t canopen_wait_until(uint32_t cobid, void* ret)
     ESP_LOGE(TAG, "Timeout waiting for COB-ID %08x", (unsigned)cobid);
     return ESP_ERR_TIMEOUT;
 }
+
+static uint32_t canopen_default_pdo_cobid(uint8_t node, canopen_pdo_dir_t dir, uint8_t pdo_num)
+{
+    static const uint16_t rx_bases[] = { 0x200u, 0x300u, 0x400u, 0x500u };
+    static const uint16_t tx_bases[] = { 0x180u, 0x280u, 0x380u, 0x480u };
+    const uint16_t *bases = (dir == CANOPEN_PDO_TX) ? tx_bases : rx_bases;
+    return (uint32_t)(bases[pdo_num - 1u] + node);
+}
+
+static uint16_t canopen_comm_index(canopen_pdo_dir_t dir, uint8_t pdo_num)
+{
+    return (uint16_t)((dir == CANOPEN_PDO_TX ? 0x1800u : 0x1400u) + (pdo_num - 1u));
+}
+
+static uint16_t canopen_map_index(canopen_pdo_dir_t dir, uint8_t pdo_num)
+{
+    return (uint16_t)((dir == CANOPEN_PDO_TX ? 0x1A00u : 0x1600u) + (pdo_num - 1u));
+}
+
+static esp_err_t canopen_pdo_write_u8(uint8_t node, uint16_t index, uint8_t subindex, uint8_t value)
+{
+    return sdo_download(0x600u + node, index, subindex, &value, sizeof(value));
+}
+
+static esp_err_t canopen_pdo_write_u16(uint8_t node, uint16_t index, uint8_t subindex, uint16_t value)
+{
+    return sdo_download(0x600u + node, index, subindex, &value, sizeof(value));
+}
+
+static esp_err_t canopen_pdo_write_u32(uint8_t node, uint16_t index, uint8_t subindex, uint32_t value)
+{
+    return sdo_download(0x600u + node, index, subindex, &value, sizeof(value));
+}
+
+static esp_err_t canopen_pdo_validate_mapping(const uint32_t *mapped, uint8_t mapped_count)
+{
+    uint16_t total_bits = 0;
+
+    ESP_RETURN_ON_FALSE(mapped_count <= 8u, ESP_ERR_INVALID_ARG, TAG, "mapped_count > 8");
+    if (mapped_count == 0u) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_FALSE(mapped != NULL, ESP_ERR_INVALID_ARG, TAG, "mapped is NULL");
+
+    for (uint8_t i = 0; i < mapped_count; ++i) {
+        uint8_t nbits = (uint8_t)(mapped[i] & 0xFFu);
+        ESP_RETURN_ON_FALSE(nbits > 0u, ESP_ERR_INVALID_ARG, TAG, "mapped entry with 0 bits");
+        total_bits = (uint16_t)(total_bits + nbits);
+    }
+
+    ESP_RETURN_ON_FALSE(total_bits <= 64u, ESP_ERR_INVALID_ARG, TAG, "PDO payload exceeds 64 bits");
+    return ESP_OK;
+}
+
+esp_err_t canopen_pdo_configure(uint8_t node,
+                                canopen_pdo_dir_t dir,
+                                uint8_t pdo_num,
+                                const canopen_pdo_cfg_t *cfg)
+{
+    esp_err_t err;
+    uint16_t comm_index;
+    uint16_t map_index;
+    uint32_t cob_id;
+
+    ESP_RETURN_ON_FALSE(cfg != NULL, ESP_ERR_INVALID_ARG, TAG, "cfg is NULL");
+    ESP_RETURN_ON_FALSE(pdo_num >= 1u && pdo_num <= 4u, ESP_ERR_INVALID_ARG, TAG, "invalid PDO number");
+    ESP_RETURN_ON_FALSE(dir == CANOPEN_PDO_RX || dir == CANOPEN_PDO_TX, ESP_ERR_INVALID_ARG, TAG, "invalid PDO dir");
+
+    err = canopen_pdo_validate_mapping(cfg->mapped, cfg->mapped_count);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    comm_index = canopen_comm_index(dir, pdo_num);
+    map_index = canopen_map_index(dir, pdo_num);
+    cob_id = cfg->cob_id != 0u ? cfg->cob_id : canopen_default_pdo_cobid(node, dir, pdo_num);
+
+    err = canopen_pdo_write_u32(node, comm_index, 0x01u, cob_id | 0x80000000u);
+    if (err != ESP_OK) return err;
+
+    err = canopen_pdo_write_u8(node, map_index, 0x00u, 0u);
+    if (err != ESP_OK) return err;
+
+    for (uint8_t i = 0; i < cfg->mapped_count; ++i) {
+        err = canopen_pdo_write_u32(node, map_index, (uint8_t)(i + 1u), cfg->mapped[i]);
+        if (err != ESP_OK) return err;
+    }
+
+    err = canopen_pdo_write_u8(node, map_index, 0x00u, cfg->mapped_count);
+    if (err != ESP_OK) return err;
+
+    err = canopen_pdo_write_u8(node, comm_index, 0x02u, cfg->transmission_type);
+    if (err != ESP_OK) return err;
+
+    if (dir == CANOPEN_PDO_TX) {
+        err = canopen_pdo_write_u16(node, comm_index, 0x03u, cfg->inhibit_time);
+        if (err != ESP_OK) return err;
+    }
+
+    err = canopen_pdo_write_u32(node, comm_index, 0x01u, cob_id & 0x7FFFFFFFu);
+    if (err != ESP_OK) return err;
+
+    return ESP_OK;
+}
+
+esp_err_t canopen_pdo_send(uint8_t node,
+                           uint8_t rpdo_num,
+                           uint32_t cob_id_override,
+                           const void *data,
+                           size_t len)
+{
+    twai_message_t msg = {
+        .extd = 0,
+        .rtr = 0,
+        .ss = 0,
+        .self = 0,
+        .dlc_non_comp = 0,
+        .identifier = cob_id_override != 0u ? cob_id_override : canopen_default_pdo_cobid(node, CANOPEN_PDO_RX, rpdo_num),
+        .data_length_code = 0,
+    };
+
+    ESP_RETURN_ON_FALSE(rpdo_num >= 1u && rpdo_num <= 4u, ESP_ERR_INVALID_ARG, TAG, "invalid RPDO number");
+    ESP_RETURN_ON_FALSE(len <= 8u, ESP_ERR_INVALID_ARG, TAG, "PDO payload too large");
+    if (len > 0u) {
+        ESP_RETURN_ON_FALSE(data != NULL, ESP_ERR_INVALID_ARG, TAG, "data is NULL");
+        memcpy(msg.data, data, len);
+    }
+    msg.data_length_code = (uint8_t)len;
+
+    return canopen_send(&msg);
+}
+
+esp_err_t canopen_pdo_subscribe(uint8_t node,
+                                uint8_t tpdo_num,
+                                uint32_t cob_id_override,
+                                canopen_handler_fn fn,
+                                void *context,
+                                canopen_handler_handle_t *out)
+{
+    uint32_t cob_id;
+    ESP_RETURN_ON_FALSE(tpdo_num >= 1u && tpdo_num <= 4u, ESP_ERR_INVALID_ARG, TAG, "invalid TPDO number");
+    ESP_RETURN_ON_FALSE(fn != NULL, ESP_ERR_INVALID_ARG, TAG, "handler is NULL");
+    ESP_RETURN_ON_FALSE(out != NULL, ESP_ERR_INVALID_ARG, TAG, "out handle is NULL");
+
+    cob_id = cob_id_override != 0u ? cob_id_override : canopen_default_pdo_cobid(node, CANOPEN_PDO_TX, tpdo_num);
+    return canopen_register_handler(cob_id, fn, context, out);
+}
+
+void canopen_pdo_payload_clear(canopen_pdo_payload_t *p)
+{
+    if (p != NULL) {
+        memset(p, 0, sizeof(*p));
+    }
+}
+
+static esp_err_t canopen_pdo_payload_put(canopen_pdo_payload_t *p, const void *src, size_t n)
+{
+    ESP_RETURN_ON_FALSE(p != NULL, ESP_ERR_INVALID_ARG, TAG, "payload is NULL");
+    ESP_RETURN_ON_FALSE(src != NULL, ESP_ERR_INVALID_ARG, TAG, "src is NULL");
+    ESP_RETURN_ON_FALSE(p->len + n <= sizeof(p->data), ESP_ERR_INVALID_SIZE, TAG, "payload overflow");
+
+    memcpy(&p->data[p->len], src, n);
+    p->len += n;
+    return ESP_OK;
+}
+
+esp_err_t canopen_pdo_payload_put_u8(canopen_pdo_payload_t *p, uint8_t v)
+{
+    return canopen_pdo_payload_put(p, &v, sizeof(v));
+}
+
+esp_err_t canopen_pdo_payload_put_u16(canopen_pdo_payload_t *p, uint16_t v)
+{
+    return canopen_pdo_payload_put(p, &v, sizeof(v));
+}
+
+esp_err_t canopen_pdo_payload_put_u32(canopen_pdo_payload_t *p, uint32_t v)
+{
+    return canopen_pdo_payload_put(p, &v, sizeof(v));
+}
+
+esp_err_t canopen_pdo_payload_put_i32(canopen_pdo_payload_t *p, int32_t v)
+{
+    return canopen_pdo_payload_put(p, &v, sizeof(v));
+}
