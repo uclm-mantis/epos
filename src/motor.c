@@ -1,11 +1,10 @@
-#include "epos_motor.h"
+#include "motor.h"
 #include "epos_types.h"
-#include "epos.h"
+#include "canopen.h"
 #include "esp_err.h"
 #include "esp_check.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "moving_average.h"
 
 /*!
     TODO: Actualmente tenemos implementado:

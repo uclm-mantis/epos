@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stdint.h>
-#include "epos_motor.h"
+#include "motor.h"
 
 #ifdef __cplusplus
 extern "C" {

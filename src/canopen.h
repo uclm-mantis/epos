@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include "canopen_types.h"
 #include "esp_err.h"
+#include "driver/twai.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,6 +56,8 @@ void canopen_max_delay_ms(unsigned delay);
 
 bool canopen_is_dump_enabled(void);
 void canopen_dump_enabled(bool enable);
+esp_err_t canopen_send(const twai_message_t* msg);
+esp_err_t canopen_post(const twai_message_t *msg);
 
 #define CANOPEN_ERROR_CHECK(x) do { \
         esp_err_t err_rc_ = (x); \
@@ -62,6 +65,21 @@ void canopen_dump_enabled(bool enable);
             _esp_error_check_failed_without_abort(err_rc_, __FILE__, __LINE__, __func__, #x); \
         } \
     } while(0)
+
+#define IS_NA(x) IS_NA_HELPER(IS_NA_PRIMITIVE_CAT(IS_NA_CHECK_, x))
+#define IS_NA_PRIMITIVE_CAT(a, b) a ## b
+#define IS_NA_CHECK_NA PROBE()
+#define PROBE() ~, 1
+#define IS_NA_HELPER(...) IS_NA_HELPER_(__VA_ARGS__, 0)
+#define IS_NA_HELPER_(a, b, ...) b
+
+#define IF_ELSE(condition) CAT(IF_, condition)
+#define IF_1(...) __VA_ARGS__ IF_1_ELSE
+#define IF_0(...)             IF_0_ELSE
+#define IF_1_ELSE(...)
+#define IF_0_ELSE(...) __VA_ARGS__
+#define CAT(a, b) a ## b
+
 
 #ifdef __cplusplus
 }

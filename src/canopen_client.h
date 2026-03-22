@@ -9,20 +9,6 @@
 extern "C" {
 #endif
 
-#define IS_NA(x) IS_NA_HELPER(IS_NA_PRIMITIVE_CAT(IS_NA_CHECK_, x))
-#define IS_NA_PRIMITIVE_CAT(a, b) a ## b
-#define IS_NA_CHECK_NA PROBE()
-#define PROBE() ~, 1
-#define IS_NA_HELPER(...) IS_NA_HELPER_(__VA_ARGS__, 0)
-#define IS_NA_HELPER_(a, b, ...) b
-
-#define IF_ELSE(condition) CAT(IF_, condition)
-#define IF_1(...) __VA_ARGS__ IF_1_ELSE
-#define IF_0(...)             IF_0_ELSE
-#define IF_1_ELSE(...)
-#define IF_0_ELSE(...) __VA_ARGS__
-#define CAT(a, b) a ## b
-
 #define GENERATE_GETTER_DECL(x, idx, subidx, T) \
     IF_ELSE(IS_NA(x)) \
     ( ) \

@@ -10,7 +10,6 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "driver/gpio.h"
-#include "driver/twai.h"
 
 #define N_ELEMS(x) (sizeof(x)/sizeof((x)[0]))
 
@@ -269,6 +268,68 @@ esp_err_t canopen_unregister_handler(canopen_handler_handle_t handle)
     return err;
 }
 
+static void canopen_send_now(request_t* self)
+{
+    dump_msg("Transmit", &self->msg);
+    twai_transmit(&self->msg, portMAX_DELAY);
+}
+
+static void canopen_send_notify(request_t *self)
+{
+    canopen_send_now(self);
+    if (self->waiter != NULL) {
+        xTaskNotifyGive(self->waiter);
+    }
+}
+
+esp_err_t canopen_post(const twai_message_t *msg)
+{
+    request_t req;
+
+    ESP_RETURN_ON_FALSE(msg != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL msg");
+    ESP_RETURN_ON_FALSE(tx_task_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "CANopen not initialized");
+
+    req = (request_t){
+        .run = canopen_send_now,
+        .msg = *msg,
+        .value = NULL,
+        .size = 0,
+        .waiter = NULL,
+    };
+
+    return xQueueSend(tx_task_queue, &req, portMAX_DELAY) == pdTRUE ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t canopen_send(const twai_message_t *msg)
+{
+    TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
+    request_t req;
+
+    ESP_RETURN_ON_FALSE(msg != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL msg");
+    ESP_RETURN_ON_FALSE(tx_task_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "CANopen not initialized");
+
+    (void) ulTaskNotifyTake(pdTRUE, 0);
+
+    req = (request_t){
+        .run = canopen_send_notify,
+        .msg = *msg,
+        .value = NULL,
+        .size = 0,
+        .waiter = waiter,
+    };
+
+    if (xQueueSend(tx_task_queue, &req, portMAX_DELAY) != pdTRUE) {
+        return ESP_FAIL;
+    }
+
+    if (ulTaskNotifyTake(pdTRUE, max_delay) != pdTRUE) {
+        ESP_LOGI(TAG, "Sender thread is blocked, unable to transmit CAN frame");
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
 static void sdo_download_response(response_t* self, twai_message_t* msg)
 {
     dump_msg("Receive", msg);
@@ -290,8 +351,7 @@ static void sdo_download_segment_request(request_t* self)
         ESP_LOGE(TAG, "No free pending response slots");
         return;
     }
-    dump_msg("Tx Seg", &self->msg);
-    twai_transmit(&self->msg, portMAX_DELAY);
+    canopen_send_now(self);
 }
 
 static void sdo_download_segment_response(response_t* self, twai_message_t* msg)
@@ -333,8 +393,7 @@ static void sdo_download_request(request_t* self)
             return;
         }
     }
-    dump_msg("Transmit", &self->msg);
-    twai_transmit(&self->msg, portMAX_DELAY);
+    canopen_send_now(self);
 }
 
 esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void* value, size_t size)
@@ -386,8 +445,7 @@ static void sdo_upload_segment_request(request_t* self)
         ESP_LOGE(TAG, "No free pending response slots");
         return;
     }
-    dump_msg("Tx Seg", &self->msg);
-    twai_transmit(&self->msg, portMAX_DELAY);
+    canopen_send_now(self);
 }
 
 static void sdo_upload_response(response_t* self, twai_message_t* msg)
@@ -417,8 +475,7 @@ static void sdo_upload_request(request_t* self)
         ESP_LOGE(TAG, "No free pending response slots");
         return;
     }
-    dump_msg("Transmit", &self->msg);
-    twai_transmit(&self->msg, portMAX_DELAY);
+    canopen_send_now(self);
 }
 
 esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void* ret)
@@ -438,25 +495,10 @@ esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void* ret)
    return ESP_OK;
 }
 
-static void nmt_request(request_t* self)
-{
-    dump_msg("Transmit", &self->msg);
-    twai_transmit(&self->msg, portMAX_DELAY);
-    xTaskNotifyGive(self->waiter);
-}
-
 esp_err_t nmt(uint8_t cs, uint8_t n)
 {
     twai_message_t msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = 0, .data_length_code = 2, .data = { cs, n, 0, 0 } };
-    TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
-    (void) ulTaskNotifyTake(pdTRUE, 0);
-    request_t req = { .run = nmt_request, .msg = msg, .waiter = waiter };
-    xQueueSend(tx_task_queue, &req, portMAX_DELAY);
-    if (ulTaskNotifyTake(pdTRUE, max_delay) != pdTRUE) {
-        ESP_LOGI(TAG, "Sender thread is blocked, unable to transmit NMT request");
-        return ESP_FAIL;
-    }
-    return ESP_OK;
+    return canopen_send(&msg);
 }
 
 

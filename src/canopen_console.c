@@ -260,7 +260,7 @@ static int cmd_read_sym(int argc, char **argv)
 static int cmd_read(int argc, char **argv)
 {
     char* arg_index = argv[1];
-    if (argc > 1 && !isdigit((int)arg_index[0])) return cmd_read_sym(argc, argv);
+    if (argc > 1 && !isdigit((unsigned char)arg_index[0])) return cmd_read_sym(argc, argv);
 
     int nerrors = arg_parse(argc, argv, (void **)&read_args);
     if (nerrors != 0) {
@@ -302,7 +302,7 @@ static int cmd_write_sym(int argc, char **argv)
 static int cmd_write(int argc, char **argv)
 {
     char* arg_index = argv[1];
-    if (argc > 1 && !isdigit((int)arg_index[0])) return cmd_write_sym(argc, argv);
+    if (argc > 1 && !isdigit((unsigned char)arg_index[0])) return cmd_write_sym(argc, argv);
 
     int nerrors = arg_parse(argc, argv, (void **)&write_args);
     if (nerrors != 0) {
