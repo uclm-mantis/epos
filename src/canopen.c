@@ -594,7 +594,7 @@ esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
     g_config.tx_io = (gpio_num_t) cfg->can_tx_pin;
     g_config.rx_io = (gpio_num_t) cfg->can_rx_pin;
 
-    max_delay = cfg->max_delay;
+    max_delay = pdMS_TO_TICKS(cfg->max_delay_ms);
     enable_dump_msg = cfg->enable_dump_msg;
 
     initialize_nvs();
@@ -619,7 +619,7 @@ esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
     return ESP_OK;
 }
 
-unsigned canopen_get_max_delay_ms(void)
+TickType_t canopen_get_max_delay_ms(void)
 {
     return pdTICKS_TO_MS(max_delay);
 }

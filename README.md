@@ -1,27 +1,35 @@
 # EPOS-CAN
 
-EPOS-CAN is a lightweight library for managing Maxon EPOS devices using Espressif microcontrollers with ESP-IDF and Arduino IDE. It allows interaction with PDO, SDO (upload and download), and NMT protocols. It features a serial console compatible with CiA 309-3 and includes numerous functionalities to make the interaction more user-friendly.
+EPOS-CAN is a lightweight CANopen library for Espressif microcontrollers using ESP-IDF. It started as a helper library for Maxon EPOS drives, but the CANopen core is now generic and can be reused with other CANopen devices. The project currently provides:
 
-Although it is still a work in progress, we believe it has reached a quite useable state and therefore we are making it public.
+- A generic CANopen core on top of ESP-IDF TWAI.
+- Client-side SDO, NMT and PDO helpers.
+- An asynchronous handler mechanism for arbitrary COB-IDs.
+- A synchronous waiting API for specific CANopen frames.
+- A generated client API from an object dictionary.
+- A generated SDO server API from a server-side object dictionary.
+- A serial/TCP console inspired by CiA 309-3.
+
+Although the project is still evolving, it is already usable for real CANopen applications on ESP32-class devices.
 
 ## Hardware requirements
 
 | Supported Targets | ESP32 | ESP32-C3 | ESP32-C6 | ESP32-H2 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
 | ----------------- | ----- | -------- | -------- | -------- | -------- | -------- | -------- |
 
-* Espressif ESP32 dev module
-* SN65HVD230 or equivalent transceiver
-* Maxon EPOS Drive Controller
+Typical setup:
+
+- Espressif ESP32 development board.
+- SN65HVD230 or equivalent CAN transceiver.
+- A CANopen device such as a Maxon EPOS controller, or any custom CANopen node.
 
 ## Installation
 
 ### ESP-IDF
 
-#### Method 1: Managed Component (Recommended)
+#### Method 1: Managed Component
 
-Add the component as a dependency using the ESP-IDF Component Manager. This method automatically manages updates and dependencies.
-
-1. Create or edit `main/idf_component.yml` in your project:
+Add the component to `main/idf_component.yml`:
 
 ```yaml
 dependencies:
@@ -29,23 +37,13 @@ dependencies:
     git: https://github.com/uclm-mantis/epos.git
 ```
 
-2. Build your project:
+Then build:
 
 ```bash
 idf.py build
 ```
 
-3. The component will be automatically downloaded to `managed_components/epos/`
-
-4. Include in your code:
-
-```c
-#include "epos.h"
-```
-
-#### Method 2: Git Submodule
-
-Add the repository as a git submodule to your project's components directory:
+#### Method 2: Git submodule
 
 ```bash
 cd your-project
@@ -85,207 +83,523 @@ git submodule update --init --recursive
 
 3. The library will appear in **Sketch → Include Library → EposCAN**
 
-## Usage
 
-### Programmatic Usage
+## Quick start
 
-#### ESP-IDF Example (High-Level Motor API)
-
-The high-level API from `epos_motor.h` provides an object-oriented interface for motor control:
+The CANopen core lives in `canopen.h` / `canopen.c`.
 
 ```c
-#include "epos.h"
-#include "epos_motor.h"
+#include "canopen.h"
 
 void app_main(void)
 {
-    // Initialize EPOS with console enabled
-    epos_init_cfg_t cfg = epos_init_default();
-    cfg.enable_console = true;
-    epos_initialize(&cfg);
-    
-    // Create motor instance for node 2
-    Motor_t* motor = motor_new(2);
-    
-    // Reset and activate motor
-    motor_reset(motor);
-    
-    // Configure profile parameters
-    MotorProfile_t profile = {
-        .velocity = 1000,
-        .acceleration = 5000,
-        .deceleration = 5000,
-        .type = PPM_TRAPEZOIDAL
-    };
-    motor_set_profile(motor, &profile);
-    
-    // Move to absolute position
-    motor_profile_position_absolute(motor, 10000);
-    
-    // Wait until target is reached
-    motor_wait_target_reached(motor);
-    
-    printf("Movement completed!\n");
-}
-```
+    canopen_init_cfg_t cfg = canopen_init_default();
+    cfg.enable_dump_msg = true;
 
-#### ESP-IDF Example (EDS-Generated API)
+    ESP_ERROR_CHECK(canopen_initialize(&cfg));
 
-The EDS API provides type-safe functions generated from the EPOS object dictionary:
-
-```c
-#include "epos.h"
-
-void app_main(void)
-{
-    // Initialize EPOS with console enabled
-    epos_init_cfg_t cfg = epos_init_default();
-    cfg.enable_console = true;
-    epos_initialize(&cfg);
-    
-    // Set target node
-    uint8_t node = 2;
-    
-    // Reset node
-    nmt_reset_node(node);
+    // Example: reset node 2 and place it in operational state
+    ESP_ERROR_CHECK(nmt_reset_node(2));
     vTaskDelay(pdMS_TO_TICKS(1000));
-    
-    // Activate the device
-    set_controlword(node, 0);
-    set_controlword(node, 6);
-    set_controlword(node, 7);
-    set_controlword(node, 0x0f);
-    
-    // Set current mode
-    set_modes_of_operation(node, -3);
-    
-    // Set desired current (500 mA)
-    set_current_mode_setting_value(node, 500);
-    
-    // Read actual current
-    int16_t current;
-    get_current_actual_value(node, &current);
-    printf("Actual current: %d mA\n", current);
+    ESP_ERROR_CHECK(nmt_start_remote_node(2));
 }
 ```
 
-#### CANopen API
+## Project structure
 
-The CANopen API provides direct access to CANopen communication services (SDO, NMT, PDO, EMCY). This example shows SDO usage:
+- `canopen.h`, `canopen.c`: generic CANopen core.
+- `canopen_client.h`, `canopen_client.c`: generated client-side API from `client_od.h`.
+- `canopen_server.h`, `canopen_server.c`: generated SDO server-side API from `server_od.h`.
+- `canopen_console.h`, `canopen_console.c`: interactive console.
+- `canopen_types.h`: low-level CANopen frame layouts and constants.
+- `client_od.h`: list of client-side object dictionaries to include.
+- `server_od.h`: list of server-side object dictionaries to include.
+- `epos_types.h`: optional typed views for Maxon EPOS objects.
+
+## CANopen core API
+
+### Initialization and shutdown
 
 ```c
-#include "epos.h"
+static inline canopen_init_cfg_t canopen_init_default(void);
+esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg);
+void canopen_request_shutdown(void);
+esp_err_t canopen_wait_shutdown(void);
+```
 
-void app_main(void)
+`canopen_init_cfg_t` contains:
+
+```c
+typedef struct {
+    int can_tx_pin;
+    int can_rx_pin;
+    unsigned max_delay_ms;
+    bool enable_dump_msg;
+} canopen_init_cfg_t;
+```
+
+Notes:
+
+- `canopen_initialize()` installs and starts the TWAI driver, creates the RX/TX/dispatch tasks and initializes the internal queues and mutexes.
+- `canopen_request_shutdown()` asks the running CANopen tasks to stop.
+- `canopen_wait_shutdown()` blocks until shutdown is processed, stops TWAI and releases internal resources.
+
+### Core send functions
+
+```c
+esp_err_t canopen_send(const twai_message_t *msg);
+esp_err_t canopen_post(const twai_message_t *msg);
+```
+
+- `canopen_send()` is synchronous with respect to enqueuing and transmit task acknowledgement.
+- `canopen_post()` only enqueues the frame for transmission and returns immediately.
+
+Use `canopen_post()` when you are implementing asynchronous services, for example inside the SDO server.
+
+### Timeouts and tracing
+
+```c
+TickType_t canopen_get_max_delay_ms(void);
+void canopen_max_delay_ms(unsigned delay);
+
+bool canopen_is_dump_enabled(void);
+void canopen_dump_enabled(bool enable);
+```
+
+- `canopen_max_delay_ms()` sets the timeout used by synchronous operations such as SDO transfers and `canopen_wait_until()`.
+- `canopen_dump_enabled()` enables frame tracing through the ESP log.
+
+## NMT API
+
+```c
+esp_err_t nmt(uint8_t cs, uint8_t n);
+static inline esp_err_t nmt_enter_preoperational(uint8_t node);
+static inline esp_err_t nmt_reset_communication(uint8_t node);
+static inline esp_err_t nmt_reset_node(uint8_t node);
+static inline esp_err_t nmt_start_remote_node(uint8_t node);
+static inline esp_err_t nmt_stop_remote_node(uint8_t node);
+```
+
+Example:
+
+```c
+ESP_ERROR_CHECK(nmt_reset_node(2));
+vTaskDelay(pdMS_TO_TICKS(1000));
+ESP_ERROR_CHECK(nmt_start_remote_node(2));
+```
+
+## SDO client API
+
+### Low-level functions
+
+```c
+esp_err_t sdo_download(uint32_t cob_id,
+                       uint16_t index,
+                       uint8_t subindex,
+                       void *value,
+                       size_t size);
+
+esp_err_t sdo_upload(uint32_t cob_id,
+                     uint16_t index,
+                     uint8_t subindex,
+                     void *ret);
+```
+
+These functions support expedited transfers and segmented transfers.
+
+Example:
+
+```c
+uint8_t node = 2;
+uint32_t sdo = 0x600 + node;
+
+uint16_t controlword = 0x000F;
+ESP_ERROR_CHECK(sdo_download(sdo, 0x6040, 0x00, &controlword, sizeof(controlword)));
+
+uint16_t statusword;
+ESP_ERROR_CHECK(sdo_upload(sdo, 0x6041, 0x00, &statusword));
+```
+
+### Generated client API
+
+`canopen_client.h` generates typed getters and setters from the object dictionaries included by `client_od.h`. The generated functions are thin wrappers over `sdo_upload()` and `sdo_download()`.
+
+Typical usage:
+
+```c
+#include "canopen_client.h"
+
+ESP_ERROR_CHECK(set_controlword(2, 0));
+ESP_ERROR_CHECK(set_controlword(2, 6));
+ESP_ERROR_CHECK(set_controlword(2, 7));
+ESP_ERROR_CHECK(set_controlword(2, 0x0F));
+
+int16_t current;
+ESP_ERROR_CHECK(get_current_actual_value(2, &current));
+```
+
+For Maxon EPOS objects, `epos_types.h` provides typed bitfield views such as `ControlWord_t`, `StatusWord_t` and `NMT_HB_state_t`.
+
+Example:
+
+```c
+ControlWord_t cw = {
+    .enable_voltage = 1,
+    .quickstop = 1,
+    .switch_on = 1,
+};
+ESP_ERROR_CHECK(set_controlword(2, cw.value));
+```
+
+## Asynchronous CANopen reception
+
+The core provides two complementary mechanisms for receiving asynchronous traffic such as TPDOs, heartbeats or EMCY.
+
+### Synchronous wait for a specific COB-ID
+
+```c
+esp_err_t canopen_wait_until(uint32_t cobid, void *ret);
+```
+
+This function blocks until a frame with the requested COB-ID arrives, or until timeout. When `ret` is not `NULL`, the first 8 data bytes are copied into the provided buffer. The implementation registers a temporary handler internally and removes it on completion or timeout.
+
+Example:
+
+```c
+typedef struct __attribute__((packed)) {
+    int32_t velocity;
+    int32_t position;
+} pdo1_t;
+
+pdo1_t pdo;
+ESP_ERROR_CHECK(canopen_wait_until(0x180 + 2, &pdo));
+```
+
+### Callback-based handlers
+
+```c
+typedef struct canopen_handler_entry *canopen_handler_handle_t;
+
+typedef void (*canopen_handler_fn)(uint32_t cobid, void *data, void *context);
+
+esp_err_t canopen_register_handler(uint32_t cobid,
+                                   canopen_handler_fn handler_fn,
+                                   void *context,
+                                   canopen_handler_handle_t *out_handle);
+
+esp_err_t canopen_unregister_handler(canopen_handler_handle_t handle);
+```
+
+Use this API when a task must react to multiple asynchronous COB-IDs without dedicating one waiting task per identifier.
+
+Example:
+
+```c
+static void heartbeat_handler(uint32_t cobid, void *data, void *context)
 {
-    // Initialize EPOS with console enabled
-    epos_init_cfg_t cfg = epos_init_default();
-    cfg.enable_console = true;
-    epos_initialize(&cfg);
-    
-    // Set target node
-    uint8_t node = 2;
-    uint32_t cob_id = 0x600 + node;  // SDO client-to-server
-    
-    // Reset node using NMT
-    nmt_reset_node(node);
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    
-    // Activate the device using SDO download
-    uint16_t controlword;
-    
-    controlword = 0;
-    sdo_download(cob_id, 0x6040, 0, &controlword, sizeof(controlword));
-    
-    controlword = 6;
-    sdo_download(cob_id, 0x6040, 0, &controlword, sizeof(controlword));
-    
-    controlword = 7;
-    sdo_download(cob_id, 0x6040, 0, &controlword, sizeof(controlword));
-    
-    controlword = 0x0f;
-    sdo_download(cob_id, 0x6040, 0, &controlword, sizeof(controlword));
-    
-    // Set current mode (index 0x6060, subindex 0)
-    int8_t mode = -3;  // Current mode
-    sdo_download(cob_id, 0x6060, 0, &mode, sizeof(mode));
-    
-    // Set desired current (index 0x2030, subindex 0) - 500 mA
-    int16_t current_setting = 500;
-    sdo_download(cob_id, 0x2030, 0, &current_setting, sizeof(current_setting));
-    
-    // Read actual current (index 0x6078, subindex 0)
-    int16_t current_actual;
-    sdo_upload(cob_id, 0x6078, 0, &current_actual);
-    printf("Actual current: %d mA\n", current_actual);
+    NMT_HB_state_t *state = (NMT_HB_state_t *)data;
+    uint8_t *last = (uint8_t *)context;
+    *last = *state;
 }
+
+uint8_t last_state = 0;
+canopen_handler_handle_t hb_handle;
+ESP_ERROR_CHECK(canopen_register_handler(0x700 + 2,
+                                         heartbeat_handler,
+                                         &last_state,
+                                         &hb_handle));
 ```
 
-For detailed documentation on each CANopen service, see the sections below.
+## PDO helper API
 
-#### Arduino Example
+The library now includes a higher-level PDO API for common client-side operations. The implementation is in `canopen.c`, and the associated declarations are expected in `canopen.h` for applications using the new helpers. The functionality currently implemented includes configuration, transmission, subscription and payload packing.
 
-```cpp
-#include <EposCAN.h>
+### PDO configuration model
 
-EPOS::CAN can;
-EPOS::Motor motor(1);  // Node ID 1
+A PDO is described by:
 
-void setup()
+- Node ID.
+- Direction: RX or TX.
+- PDO number: 1 to 4.
+- Optional COB-ID override.
+- Transmission type.
+- Optional inhibit time for TPDO.
+- Mapping table encoded as standard 32-bit mapping entries.
+
+The code uses the standard default COB-ID bases:
+
+- TPDO1..4: `0x180`, `0x280`, `0x380`, `0x480` + node ID.
+- RPDO1..4: `0x200`, `0x300`, `0x400`, `0x500` + node ID.
+
+Communication and mapping parameter indices are derived automatically:
+
+- TPDO communication: `0x1800`..`0x1803`
+- RPDO communication: `0x1400`..`0x1403`
+- TPDO mapping: `0x1A00`..`0x1A03`
+- RPDO mapping: `0x1600`..`0x1603`
+
+### `canopen_pdo_configure()`
+
+```c
+esp_err_t canopen_pdo_configure(uint8_t node,
+                                canopen_pdo_dir_t dir,
+                                uint8_t pdo_num,
+                                const canopen_pdo_cfg_t *cfg);
+```
+
+Behaviour:
+
+1. Validates that `pdo_num` is in the range 1..4.
+2. Validates the mapping array:
+   - at most 8 mapped entries,
+   - no zero-sized entries,
+   - total payload not larger than 64 bits.
+3. Disables the PDO by setting the valid bit in the COB-ID.
+4. Clears the mapping count.
+5. Writes each mapping entry.
+6. Restores the mapping count.
+7. Programs transmission type and, for TPDO, inhibit time.
+8. Re-enables the PDO.
+
+This is the recommended way to configure RPDO/TPDO mappings from application code.
+
+### `canopen_pdo_send()`
+
+```c
+esp_err_t canopen_pdo_send(uint8_t node,
+                           uint8_t rpdo_num,
+                           uint32_t cob_id_override,
+                           const void *data,
+                           size_t len);
+```
+
+Sends one RPDO frame.
+
+- `rpdo_num` must be in 1..4.
+- `len` must be at most 8.
+- If `cob_id_override == 0`, the default RPDO COB-ID is used.
+
+Example:
+
+```c
+uint8_t data[2] = { 0x34, 0x12 };
+ESP_ERROR_CHECK(canopen_pdo_send(2, 1, 0, data, sizeof(data)));
+```
+
+### `canopen_pdo_subscribe()`
+
+```c
+esp_err_t canopen_pdo_subscribe(uint8_t node,
+                                uint8_t tpdo_num,
+                                uint32_t cob_id_override,
+                                canopen_handler_fn fn,
+                                void *context,
+                                canopen_handler_handle_t *out);
+```
+
+Registers a handler for one TPDO using the default or overridden COB-ID.
+
+Example:
+
+```c
+static void tpdo1_handler(uint32_t cobid, void *data, void *context)
 {
-    Serial.begin(115200);
-    
-    // Initialize CAN with console enabled
-    can.begin(true);
-    
-    // Reset and activate motor
-    motor.reset();
-    
-    // Example: Profile position mode
-    motor.profile_position_relative(32000);
+    (void)cobid;
+    memcpy(context, data, 8);
 }
 
-void loop()
-{
-    if (motor.is_target_reached()) {
-        Serial.println("Target reached!");
-        delay(1000);
-    }
-}
+uint8_t latest_pdo[8];
+canopen_handler_handle_t tpdo_handle;
+ESP_ERROR_CHECK(canopen_pdo_subscribe(2, 1, 0,
+                                      tpdo1_handler,
+                                      latest_pdo,
+                                      &tpdo_handle));
 ```
 
-### Console Usage
+### PDO payload builder helpers
 
-The EPOS-CAN library includes a powerful serial console for interactive CANopen communication.
-
-* Connect with your board using a Monitor. Sometimes the ESP-IDF builtin monitor on Windows is not recognized as an ANSI capable monitor and the console thread falls back to dumb mode. You may either press the reset button in the development board or use a different monitor application (such as *putty*).
-* The console implements full line editing, completion and history using `linenoise`.
-
-#### Basic commands
-
-
-The console is almost compatible with CiA 309 as implemented by CANopenNode. Please, note that we do not have direct access to CiA 309, we do not aim at a fully compliant implementation. Nonetheless, although we implement significant improvements over a basic CiA 309, the only known minor departure from CiA 309 has to do with negative numbers. See below.
-
-The console has a builtin help system:
-
-```
-> help
-Available commands:
-  [[net] node] r[ead] <index> <subindex> [<datatype>]
-  [[net] node] r[ead] <symbol> [<datatype>]
-  [[net] node] w[rite] <index> <subindex> <datatype> <value>
-  [[net] node] w[rite] <symbol> <value>
-  [[net] node] start
-  [[net] node] stop
-  [[net] node] preop[erational]
-  [[net] node] reset node|comm[unication]
-  [net] set network|node|sdo_timeout|sdo_block <value>
-  help [datatype|object|<symbol prefix>]
+```c
+void canopen_pdo_payload_clear(canopen_pdo_payload_t *p);
+esp_err_t canopen_pdo_payload_put_u8(canopen_pdo_payload_t *p, uint8_t v);
+esp_err_t canopen_pdo_payload_put_u16(canopen_pdo_payload_t *p, uint16_t v);
+esp_err_t canopen_pdo_payload_put_u32(canopen_pdo_payload_t *p, uint32_t v);
+esp_err_t canopen_pdo_payload_put_i32(canopen_pdo_payload_t *p, int32_t v);
 ```
 
-This help is not automatically generated by the argument parser library because we need to implement *net* and *node* handling by hand before they are passed to the actual command. Therefore it does not document extended commands.  In particular, the project comes with a WIP compatibility layer for a former library (FC) as an example of how a user may add a custom command set.
+These helpers append little-endian scalar values to a `canopen_pdo_payload_t` buffer and prevent overflow beyond 8 bytes.
 
-Although CiA 309 allows multiple CAN networks connected to the same controller, we are only using devices with a single TWAI peripheral. We are aware of the development of dual TWAI Espressif chips, but we haven't got one yet.
+Example:
+
+```c
+canopen_pdo_payload_t p;
+canopen_pdo_payload_clear(&p);
+ESP_ERROR_CHECK(canopen_pdo_payload_put_u16(&p, 0x1234));
+ESP_ERROR_CHECK(canopen_pdo_payload_put_i32(&p, -25));
+ESP_ERROR_CHECK(canopen_pdo_send(2, 1, 0, p.data, p.len));
+```
+
+### Generated PDO mapping enums
+
+`canopen_client.h` also generates enums with standard mapping values for objects flagged as PDO-mappable in `client_od.h`.
+
+- `pdo_tx_mapping_object_t`
+- `pdo_rx_mapping_object_t`
+
+Each enum value encodes the standard CANopen mapping word:
+
+```c
+(index << 16) | (subindex << 8) | (sizeof(type) << 3)
+```
+
+This lets you configure PDO mappings without hardcoding magic numbers.
+
+## SDO server API
+
+The server-side support is implemented in `canopen_server.h` / `canopen_server.c`. It provides a generated object dictionary with typed getter/setter callbacks and a multi-instance SDO server bound to node IDs.
+
+### Server object dictionary callbacks
+
+The user writes typed callbacks referenced from `server_od.h`:
+
+```c
+canopen_od_status_t on_get_my_value(uint32_t *value);
+canopen_od_status_t on_set_my_value(uint32_t value);
+```
+
+The generated wrappers adapt those typed callbacks to the generic dispatcher API.
+
+### Server-side OD status values
+
+```c
+typedef enum {
+    CANOPEN_OD_OK = 0,
+    CANOPEN_OD_UNSUPPORTED_ACCESS,
+    CANOPEN_OD_WRITEONLY,
+    CANOPEN_OD_READONLY,
+    CANOPEN_OD_NO_SUCH_OBJECT,
+    CANOPEN_OD_NO_SUCH_SUBINDEX,
+    CANOPEN_OD_TYPE_MISMATCH,
+    CANOPEN_OD_INVALID_VALUE,
+    CANOPEN_OD_DATA_TOO_LONG,
+    CANOPEN_OD_DATA_TOO_SHORT,
+    CANOPEN_OD_HW_ERROR,
+} canopen_od_status_t;
+```
+
+These are converted to CiA 301 SDO abort codes by:
+
+```c
+uint32_t canopen_od_status_to_abort_code(canopen_od_status_t st);
+```
+
+### Lifecycle
+
+```c
+esp_err_t canopen_server_start(uint8_t node_id);
+esp_err_t canopen_server_stop(uint8_t node_id);
+```
+
+- `canopen_server_start()` registers the SDO request handler for `0x600 + node_id` and responds through `0x580 + node_id`.
+- `canopen_server_stop()` unregisters the handler and releases the instance slot.
+
+Up to 8 concurrent server instances are currently supported.
+
+### Direct OD access
+
+```c
+canopen_od_status_t canopen_server_od_get(uint16_t index,
+                                          uint8_t subindex,
+                                          void *value,
+                                          size_t size);
+
+canopen_od_status_t canopen_server_od_set(uint16_t index,
+                                          uint8_t subindex,
+                                          const void *value,
+                                          size_t size);
+
+const canopen_server_od_entry_t *canopen_server_find(uint16_t index,
+                                                     uint8_t subindex);
+```
+
+These functions are useful both inside and outside the SDO protocol.
+
+### Explicit dispatcher
+
+```c
+esp_err_t canopen_server_dispatch_sdo(uint32_t cobid_req,
+                                      const void *req,
+                                      size_t req_size,
+                                      uint32_t *cobid_resp,
+                                      void *resp,
+                                      size_t *resp_size);
+```
+
+This function is reserved for future decoupling of the SDO server from the CAN handler registration. In the current implementation it returns `ESP_ERR_NOT_SUPPORTED`, because stateful transfers are handled by registered server instances instead.
+
+### Protocol coverage
+
+The current server implementation supports:
+
+- SDO initiate download, expedited and segmented.
+- SDO download segments.
+- SDO initiate upload, expedited and segmented.
+- SDO upload segments.
+
+SDO block upload/download is not yet implemented.
+
+## Console API
+
+The console implementation lives in `canopen_console.h` / `canopen_console.c`. It uses the generated client object dictionary and exposes an interactive CiA 309-style interface.
+
+### Initialization
+
+```c
+void canopen_console_register_commands(void);
+void canopen_console_init(const canopen_console_cfg_t *cfg);
+```
+
+Configuration:
+
+```c
+typedef struct {
+    int rx_buffer_size;
+    int tx_buffer_size;
+    bool dumb_mode;
+    bool enable_usb_console;
+    bool enable_tcp_console;
+} canopen_console_cfg_t;
+```
+
+Default configuration enables the USB console and disables the TCP console. The TCP console listens on port 3344.
+
+### Supported commands
+
+The console provides, among others:
+
+```text
+[[net] node] r[ead] <index> <subindex> [<datatype>]
+[[net] node] r[ead] <symbol> [<datatype>]
+[[net] node] w[rite] <index> <subindex> <datatype> <value>
+[[net] node] w[rite] <symbol> <value>
+[[net] node] start
+[[net] node] stop
+[[net] node] preop[erational]
+[[net] node] reset node|comm[unication]
+[net] set network|node|sdo_timeout|sdo_block|dump <value>
+[net] get network|node|sdo_timeout|sdo_block|dump
+about [datatype|object|<symbol prefix>]
+exit
+```
+
+Notes:
+
+- Symbolic object access comes from the generated object dictionary.
+- Completion and history are provided by `linenoise`.
+- Because of argument parsing rules, negative numeric literals in some cases need the `--` separator, for example:
+
+```text
+w modes_of_operation -- -3
+```
 
 Unlike CANopenNode or similar CANopen implementations, we do not aim at producing a shadow copy of the object dictionary in the controller. You may, nonetheless, replicate as much as you want of the object dictionary using a somewhat standard callback mechanism.
 
@@ -330,7 +644,7 @@ Now let us complete the activation sequence:
 > w controlword 0xf
 ```
 
-Nothe that you may us the cursor *up* key to recall previous command and then edit that command to issue the new one.
+Note that you may us the cursor *up* key to recall previous command and then edit that command to issue the new one.
 
 If everything is right your EPOS will have a steady green led signaling it is ready.
 
@@ -362,151 +676,31 @@ And finally stop it:
 > w current_mode_setting_value 0
 ```
 
-## CANopen API Reference
-
-The library provides direct access to CANopen communication services. This section documents the low-level CANopen API.
-
-### NMT (Network Management)
-
-NMT services control the state of CANopen nodes:
+### Minimal console setup
 
 ```c
-#include "epos.h"
+#include "canopen.h"
+#include "canopen_console.h"
 
-// Reset node (triggers boot-up)
-esp_err_t nmt_reset_node(uint8_t node);
-
-// Reset communication only
-esp_err_t nmt_reset_communication(uint8_t node);
-
-// Start remote node (transition to Operational)
-esp_err_t nmt_start_remote_node(uint8_t node);
-
-// Stop remote node
-esp_err_t nmt_stop_remote_node(uint8_t node);
-
-// Enter pre-operational state
-esp_err_t nmt_enter_preoperational(uint8_t node);
-```
-
-Example:
-
-```c
-uint8_t node = 2;
-
-// Reset and wait for boot-up
-nmt_reset_node(node);
-vTaskDelay(pdMS_TO_TICKS(1000));
-
-// Start node (enter Operational state)
-nmt_start_remote_node(node);
-```
-
-### SDO (Service Data Object)
-
-For each object in the object dictionary you have a `setter` if it is writeable and a `getter` if it is readable.  Syntax of a setter is as follows:
-
-```C
-esp_err_t ec = set_controlword(n, 7);
-```
-
-First argument is the Node ID, second argument is the value to be set. The type of `value` is given in the object dictionary (see `object_dictionary.h`). It should return `ESP_OK` if everything goes as expected.
-
-A bitwise description of the types required for a given object is also available in `epos_types.h`. For example, type `ControlWord_t` allows bit-level manipulation of the control word. The above example may also be written as:
-
-```C
-esp_err_t ec = set_controlword(n, (ControlWord_t){.enable_voltage = 1, .quickstop = 1, .switch_on = 1});
-```
-
-Getters are similar but second argument is a pointer to the location of the actual value.  For example, you may read the actual current value (in mA) as follows:
-
-```C
-int16_t current;
-esp_err_t ec = get_current_actual_value(node, &current);
-```
-
-Sometimes you may also require bit-level manipulation of the return value. Use the types provided in `epos_types.h` as follows:
-
-```C
-StatusWord_t status;
-esp_err_t ec = get_statusword(n, (uint16_t*)&status);
-if (status.target_reached) {
-    // ...
-}
-```
-
-SDO interaction is synchronous. If there is an ongoing SDO request while the running thread starts another SDO request then the running thread would block until a response is received for the ongoing SDO request.  There is a setable parameter `sdo_timeout` to adjust the maximum waiting time before a TIMEOUT error is returned.
-
-#### Low-Level SDO Functions
-
-For direct CANopen communication:
-
-```c
-// Download (write) data to object dictionary
-esp_err_t sdo_download(uint32_t cob_id, uint16_t index, uint8_t subindex, 
-                       void* value, size_t size);
-
-// Upload (read) data from object dictionary
-esp_err_t sdo_upload(uint32_t cob_id, uint16_t index, uint8_t subindex, 
-                     void* ret);
-```
-
-Example:
-
-```c
-uint8_t node = 2;
-uint32_t cob_id = 0x600 + node;
-
-// Write controlword (0x6040)
-uint16_t controlword = 0x0f;
-sdo_download(cob_id, 0x6040, 0, &controlword, sizeof(controlword));
-
-// Read statusword (0x6041)
-uint16_t statusword;
-sdo_upload(cob_id, 0x6041, 0, &statusword);
-```
-
-### PDO (Process Data Object), NMT Heartbeats, EMCY
-
-There are two ways to receive asynchronous notifications such as NMT heartbeats, PDO notifications or EMCY errors. The simplest interface is the synchronous interface.  Yoy may wait for a specific notification. For example, supose you are waiting for actual velocity updates from a periodic PDO with COB-ID 0x182 (0x180 + node ID).
-
-```C
-typedef struct __attribute__((packed)) {
-    int32_t velocity;
-    // ... remaining mapped objects
-} PDO1_t;
-
-
-for(;;) {
-    PDO1_t pdo;
-    esp_err_t ec = epos_wait_until(0x180 + n, &pdo);
-    // use new pdo.velocity value
-}
-```
-
-This is by far the easiest use case but sometimes you need to react to whatever notification it arrives and you may not be able to use one thread per COB-ID.  Then you can use a simple callback mechanism. For example, assume you will handle NMT heartbeat notifications in the same thread you wait for a PDO message:
-
-```C
-void my_heartbeat_handler(uint32_t cobid, void* msg, void* context)
+void app_main(void)
 {
-    NMT_HB_state_t* state = (NMT_HB_state_t*) msg;
-    uint8_t* current_state = (uint8_t*) context;
-    *current_state = *state; 
+    ESP_ERROR_CHECK(canopen_initialize(NULL));
+    canopen_console_register_commands();
+    canopen_console_init(NULL);
 }
 ```
 
-Registering the callback is straightforward:
+## Building APIs from EDS / OD files
 
-```C
-uint8_t current_state;
-epos_register_canopen_handler(0x700 + n, &my_heartbeat_handler, &current_state);
-```
+The project can be used beyond Maxon EPOS devices. CANopen Electronic Data Sheet (EDS files, CiA 306-1) provide a full description of the capabilities of a device. You may use `eds_to_od.py` python script to extract the information from the EDS into a simple object dictionary table. Then, you may use `extract.py` python script to automatically generate an API customized for your device. 
 
-## Build from CANopen EDS
+- `client_od.h` is intended to aggregate one or more client-side object dictionary headers.
+- `server_od.h` is intended to aggregate one or more server-side object dictionary headers.
+- The generated macros in `canopen_client.h` and `canopen_server.h` turn those OD entries into typed client and server APIs.
 
-Although this project started as a library to support Maxon controllers programming from Espressif microcontrollers, it may also be used to build custom libraries to support other CANopen devices.
+This makes it practical to generate support for custom CANopen devices from EDS-derived tables.
 
-CANopen Electronic Data Sheet (EDS files, CiA 306-1) provide a full description of the capabilities of a device. You may use `eds_to_od.py` python script to extract the information from the EDS into a simple object dictionary table. Then, you may use `extract.py` python script to automatically generate an API customized for your device. 
+
 
 ## Acknowledgements
 

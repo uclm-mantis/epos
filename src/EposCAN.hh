@@ -16,15 +16,12 @@
       controladora que se vaya a usar.
 */
 
-#include "epos.h"
+#include "canopen.h"
 #include "canopen_console.h"
-#include "epos_motor.h"
-#include "epos_motor_console.h"
+#include "epos.h"
+#include "motor.h"
+#include "motor_console.h"
 #include "esp_debug_helpers.h"
-
-#ifndef ENABLE_EPOS_CAN_EXCEPTIONS
-#include "esp_debug_helpers.h"
-#endif
 
 namespace EPOS {
 

@@ -6,6 +6,8 @@
 extern "C" {
 #endif
 
+typedef uint64_t string8_t;
+
 /*
     NOTA (FMF): Intento utilizar la misma nomenclatura que el estándar CANopen CiA 301 y la misma descomposición
     en protocolos independientes. 

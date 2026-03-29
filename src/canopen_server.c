@@ -5,65 +5,15 @@
 #include "esp_log.h"
 
 #define N_ELEMS(x) (sizeof(x) / sizeof((x)[0]))
-#define MAX_CANOPEN_SDO_SERVERS 8
 #define CANOPEN_SERVER_TRANSFER_MAX 256
 
 static const char *TAG = "CANOPEN_SERVER";
-
-/* -------------------------------------------------------------------------- */
-/*  Wrappers generados desde server_od.h                                      */
-/* -------------------------------------------------------------------------- */
-
-#define OBJ(id,sid,d,i,t,rp,tp,r,w) GENERATE_SERVER_GETTER_WRAPPER(r, t)
-#include "server_od.h"
-#undef OBJ
-
-#define OBJ(id,sid,d,i,t,rp,tp,r,w) GENERATE_SERVER_SETTER_WRAPPER(w, t)
-#include "server_od.h"
-#undef OBJ
-
-/* -------------------------------------------------------------------------- */
-/*  Tabla OD servidor                                                         */
-/* -------------------------------------------------------------------------- */
-
-static const canopen_server_od_entry_t server_od[] = {
-#define OBJ(id,sid,d,i,t,rp,tp,r,w) GENERATE_SERVER_OD_ENTRY(id, sid, t, r, w),
-#include "server_od.h"
-#undef OBJ
-};
-
-/* -------------------------------------------------------------------------- */
-/*  Estado por canal SDO servidor                                             */
-/* -------------------------------------------------------------------------- */
 
 typedef enum {
     CANOPEN_SERVER_SDO_IDLE = 0,
     CANOPEN_SERVER_SDO_DOWNLOAD_SEG,
     CANOPEN_SERVER_SDO_UPLOAD_SEG,
 } canopen_server_sdo_state_t;
-
-typedef struct {
-    bool in_use;
-    uint8_t node_id;
-    uint32_t cobid_req;
-    uint32_t cobid_resp;
-    canopen_handler_handle_t handle;
-
-    canopen_server_sdo_state_t state;
-    uint16_t index;
-    uint8_t subindex;
-    uint8_t toggle;
-
-    uint8_t buf[CANOPEN_SERVER_TRANSFER_MAX];
-    size_t size;
-    size_t offset;
-} canopen_server_instance_t;
-
-static canopen_server_instance_t server_instances[MAX_CANOPEN_SDO_SERVERS];
-
-/* -------------------------------------------------------------------------- */
-/*  Abort codes                                                               */
-/* -------------------------------------------------------------------------- */
 
 uint32_t canopen_od_status_to_abort_code(canopen_od_status_t st)
 {
@@ -83,11 +33,7 @@ uint32_t canopen_od_status_to_abort_code(canopen_od_status_t st)
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Helpers internos                                                          */
-/* -------------------------------------------------------------------------- */
-
-static void server_reset_transfer(canopen_server_instance_t *inst)
+static void server_reset_transfer(canopen_server_t *inst)
 {
     inst->state = CANOPEN_SERVER_SDO_IDLE;
     inst->index = 0;
@@ -98,28 +44,39 @@ static void server_reset_transfer(canopen_server_instance_t *inst)
 }
 
 static const canopen_server_od_entry_t *
-canopen_server_find_internal(uint16_t index, uint8_t subindex, bool *same_index_found)
+canopen_server_find_internal(const canopen_server_od_entry_t *od,
+                             size_t od_len,
+                             uint16_t index,
+                             uint8_t subindex,
+                             bool *same_index_found)
 {
     if (same_index_found) {
         *same_index_found = false;
     }
 
-    for (size_t i = 0; i < N_ELEMS(server_od); ++i) {
-        if (server_od[i].index == index) {
+    if (od == NULL) {
+        return NULL;
+    }
+
+    for (size_t i = 0; i < od_len; ++i) {
+        if (od[i].index == index) {
             if (same_index_found) {
                 *same_index_found = true;
             }
-            if (server_od[i].subindex == subindex) {
-                return &server_od[i];
+            if (od[i].subindex == subindex) {
+                return &od[i];
             }
         }
     }
     return NULL;
 }
 
-const canopen_server_od_entry_t *canopen_server_find(uint16_t index, uint8_t subindex)
+const canopen_server_od_entry_t *canopen_server_find(const canopen_server_od_entry_t *od,
+                                                     size_t od_len,
+                                                     uint16_t index,
+                                                     uint8_t subindex)
 {
-    return canopen_server_find_internal(index, subindex, NULL);
+    return canopen_server_find_internal(od, od_len, index, subindex, NULL);
 }
 
 static canopen_od_status_t canopen_server_entry_get(const canopen_server_od_entry_t *entry,
@@ -160,14 +117,16 @@ static canopen_od_status_t canopen_server_entry_set(const canopen_server_od_entr
     return entry->set(value);
 }
 
-canopen_od_status_t canopen_server_od_get(uint16_t index,
+canopen_od_status_t canopen_server_od_get(const canopen_server_od_entry_t *od,
+                                          size_t od_len,
+                                          uint16_t index,
                                           uint8_t subindex,
                                           void *value,
                                           size_t size)
 {
     bool same_index_found = false;
     const canopen_server_od_entry_t *entry =
-        canopen_server_find_internal(index, subindex, &same_index_found);
+        canopen_server_find_internal(od, od_len, index, subindex, &same_index_found);
 
     if (entry == NULL) {
         return same_index_found ? CANOPEN_OD_NO_SUCH_SUBINDEX
@@ -176,14 +135,16 @@ canopen_od_status_t canopen_server_od_get(uint16_t index,
     return canopen_server_entry_get(entry, value, size);
 }
 
-canopen_od_status_t canopen_server_od_set(uint16_t index,
+canopen_od_status_t canopen_server_od_set(const canopen_server_od_entry_t *od,
+                                          size_t od_len,
+                                          uint16_t index,
                                           uint8_t subindex,
                                           const void *value,
                                           size_t size)
 {
     bool same_index_found = false;
     const canopen_server_od_entry_t *entry =
-        canopen_server_find_internal(index, subindex, &same_index_found);
+        canopen_server_find_internal(od, od_len, index, subindex, &same_index_found);
 
     if (entry == NULL) {
         return same_index_found ? CANOPEN_OD_NO_SUCH_SUBINDEX
@@ -218,20 +179,16 @@ static esp_err_t canopen_server_send(uint32_t cobid, const void *payload8)
     };
 
     memcpy(msg.data, payload8, 8);
-    return canopen_post(&msg); // solo encola, no espera
+    return canopen_post(&msg);
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Subprotocolos servidor                                                    */
-/* -------------------------------------------------------------------------- */
-
-static esp_err_t sdo_server_download(canopen_server_instance_t *inst,
+static esp_err_t sdo_server_download(canopen_server_t *inst,
                                      const SDO_download_req_t *req,
                                      uint8_t resp8[8])
 {
     bool same_index_found = false;
     const canopen_server_od_entry_t *entry =
-        canopen_server_find_internal(req->index, req->subindex, &same_index_found);
+        canopen_server_find_internal(inst->od, inst->od_len, req->index, req->subindex, &same_index_found);
 
     SDO_download_resp_t *resp = (SDO_download_resp_t *)resp8;
     memset(resp8, 0, 8);
@@ -256,7 +213,7 @@ static esp_err_t sdo_server_download(canopen_server_instance_t *inst,
 
     if (req->e) {
         size_t size = req->s ? (size_t)(4u - req->n) : entry->size;
-        canopen_od_status_t st = canopen_server_od_set(req->index, req->subindex, req->d, size);
+        canopen_od_status_t st = canopen_server_od_set(inst->od, inst->od_len, req->index, req->subindex, req->d, size);
         if (st != CANOPEN_OD_OK) {
             sdo_make_abort(req->index, req->subindex,
                            canopen_od_status_to_abort_code(st),
@@ -299,7 +256,7 @@ static esp_err_t sdo_server_download(canopen_server_instance_t *inst,
     return ESP_OK;
 }
 
-static esp_err_t sdo_server_download_segment(canopen_server_instance_t *inst,
+static esp_err_t sdo_server_download_segment(canopen_server_t *inst,
                                              const SDO_download_seg_req_t *req,
                                              uint8_t resp8[8])
 {
@@ -343,10 +300,9 @@ static esp_err_t sdo_server_download_segment(canopen_server_instance_t *inst,
             return ESP_OK;
         }
 
-        canopen_od_status_t st = canopen_server_od_set(inst->index,
-                                                       inst->subindex,
-                                                       inst->buf,
-                                                       inst->size);
+        canopen_od_status_t st = canopen_server_od_set(inst->od, inst->od_len,
+                                                       inst->index, inst->subindex,
+                                                       inst->buf, inst->size);
         if (st != CANOPEN_OD_OK) {
             sdo_make_abort(inst->index, inst->subindex,
                            canopen_od_status_to_abort_code(st),
@@ -363,13 +319,13 @@ static esp_err_t sdo_server_download_segment(canopen_server_instance_t *inst,
     return ESP_OK;
 }
 
-static esp_err_t sdo_server_upload(canopen_server_instance_t *inst,
+static esp_err_t sdo_server_upload(canopen_server_t *inst,
                                    const SDO_upload_req_t *req,
                                    uint8_t resp8[8])
 {
     bool same_index_found = false;
     const canopen_server_od_entry_t *entry =
-        canopen_server_find_internal(req->index, req->subindex, &same_index_found);
+        canopen_server_find_internal(inst->od, inst->od_len, req->index, req->subindex, &same_index_found);
 
     SDO_upload_resp_t *resp = (SDO_upload_resp_t *)resp8;
     memset(resp8, 0, 8);
@@ -392,10 +348,9 @@ static esp_err_t sdo_server_upload(canopen_server_instance_t *inst,
 
     server_reset_transfer(inst);
 
-    canopen_od_status_t st = canopen_server_od_get(req->index,
-                                                   req->subindex,
-                                                   inst->buf,
-                                                   sizeof(inst->buf));
+    canopen_od_status_t st = canopen_server_od_get(inst->od, inst->od_len,
+                                                   req->index, req->subindex,
+                                                   inst->buf, sizeof(inst->buf));
     if (st != CANOPEN_OD_OK) {
         sdo_make_abort(req->index, req->subindex,
                        canopen_od_status_to_abort_code(st),
@@ -423,7 +378,7 @@ static esp_err_t sdo_server_upload(canopen_server_instance_t *inst,
         return ESP_OK;
     }
 
-    *resp = (SDO_upload_resp_t) {
+    *resp = (SDO_upload_resp_t){
         .scs = SDO_SCS_UPLOAD,
         .s = 1,
         .e = 0,
@@ -436,7 +391,7 @@ static esp_err_t sdo_server_upload(canopen_server_instance_t *inst,
     return ESP_OK;
 }
 
-static esp_err_t sdo_server_upload_segment(canopen_server_instance_t *inst,
+static esp_err_t sdo_server_upload_segment(canopen_server_t *inst,
                                            const SDO_upload_seq_req_t *req,
                                            uint8_t resp8[8])
 {
@@ -477,137 +432,114 @@ static esp_err_t sdo_server_upload_segment(canopen_server_instance_t *inst,
     return ESP_OK;
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Dispatcher                                                                */
-/* -------------------------------------------------------------------------- */
-
-esp_err_t canopen_server_dispatch_sdo(uint32_t cobid_req,
+esp_err_t canopen_server_dispatch_sdo(canopen_server_t *server,
+                                      uint32_t cobid_req,
                                       const void *req,
                                       size_t req_size,
                                       uint32_t *cobid_resp,
                                       void *resp,
                                       size_t *resp_size)
 {
-    uint8_t frame[8] = {0};
+    const uint8_t *frame = (const uint8_t *)req;
+    uint8_t resp8[8] = {0};
+    esp_err_t err = ESP_OK;
 
+    ESP_RETURN_ON_FALSE(server != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL server");
     ESP_RETURN_ON_FALSE(req != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL req");
     ESP_RETURN_ON_FALSE(resp != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL resp");
     ESP_RETURN_ON_FALSE(cobid_resp != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL cobid_resp");
     ESP_RETURN_ON_FALSE(resp_size != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL resp_size");
     ESP_RETURN_ON_FALSE(req_size <= 8, ESP_ERR_INVALID_ARG, TAG, "req too large");
 
-    memcpy(frame, req, req_size);
-    *cobid_resp = (cobid_req - 0x600u) + 0x580u;
-    *resp_size = 8;
-
-    /* Esta función genérica ya no mantiene estado. El estado vive en la instancia. */
-    sdo_make_abort(0, 0, 0x08000000u, resp);
-    return ESP_ERR_NOT_SUPPORTED;
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Handler registrado en canopen                                             */
-/* -------------------------------------------------------------------------- */
-
-static void canopen_server_sdo_handler(uint32_t cobid, void *data, void *context)
-{
-    canopen_server_instance_t *inst = (canopen_server_instance_t *)context;
-    const uint8_t *frame = (const uint8_t *)data;
-    uint8_t resp8[8] = {0};
-    esp_err_t err = ESP_OK;
-
-    if (inst == NULL || frame == NULL) {
-        return;
-    }
-
     switch ((frame[0] >> 5) & 0x7u) {
     case SDO_CCS_DOWNLOAD:
-        err = sdo_server_download(inst, (const SDO_download_req_t *)frame, resp8);
+        err = sdo_server_download(server, (const SDO_download_req_t *)frame, resp8);
         break;
-
     case SDO_CCS_DOWNLOAD_SEG:
-        err = sdo_server_download_segment(inst, (const SDO_download_seg_req_t *)frame, resp8);
+        err = sdo_server_download_segment(server, (const SDO_download_seg_req_t *)frame, resp8);
         break;
-
     case SDO_CCS_UPLOAD:
-        err = sdo_server_upload(inst, (const SDO_upload_req_t *)frame, resp8);
+        err = sdo_server_upload(server, (const SDO_upload_req_t *)frame, resp8);
         break;
-
     case SDO_CCS_UPLOAD_SEG:
-        err = sdo_server_upload_segment(inst, (const SDO_upload_seq_req_t *)frame, resp8);
+        err = sdo_server_upload_segment(server, (const SDO_upload_seq_req_t *)frame, resp8);
         break;
-
-    case SDO_CCS_UPLOAD_BLK:
-    case SDO_CCS_DOWNLOAD_BLK:
     default:
         sdo_make_abort(0, 0, 0x05040001u, resp8);
+        err = ESP_OK;
         break;
     }
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "SDO server handler failed for node %u", (unsigned)inst->node_id);
+        return err;
+    }
+
+    *cobid_resp = (cobid_req - 0x600u) + 0x580u;
+    memcpy(resp, resp8, 8);
+    *resp_size = 8;
+    return ESP_OK;
+}
+
+static void canopen_server_sdo_handler(uint32_t cobid, void *data, void *context)
+{
+    canopen_server_t *server = (canopen_server_t *)context;
+    uint8_t resp8[8] = {0};
+    uint32_t resp_cobid = 0;
+    size_t resp_size = 0;
+
+    if (server == NULL || data == NULL) {
         return;
     }
 
-    if (canopen_server_send(inst->cobid_resp, resp8) != ESP_OK) {
-        ESP_LOGE(TAG, "SDO response transmit failed for node %u", (unsigned)inst->node_id);
+    if (canopen_server_dispatch_sdo(server, cobid, data, 8, &resp_cobid, resp8, &resp_size) != ESP_OK) {
+        ESP_LOGE(TAG, "SDO dispatch failed for node %u", (unsigned)server->node_id);
+        return;
+    }
+
+    if (resp_size == 8 && canopen_server_send(resp_cobid, resp8) != ESP_OK) {
+        ESP_LOGE(TAG, "SDO response transmit failed for node %u", (unsigned)server->node_id);
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Lifecycle                                                                 */
-/* -------------------------------------------------------------------------- */
-
-esp_err_t canopen_server_start(uint8_t node_id)
+esp_err_t canopen_server_start(canopen_server_t *server,
+                               uint8_t node_id,
+                               const canopen_server_od_entry_t *od,
+                               size_t od_len)
 {
-    uint32_t cobid_req = 0x600u + node_id;
-    uint32_t cobid_resp = 0x580u + node_id;
+    ESP_RETURN_ON_FALSE(server != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL server");
+    ESP_RETURN_ON_FALSE(od != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL od");
+    ESP_RETURN_ON_FALSE(od_len > 0, ESP_ERR_INVALID_ARG, TAG, "empty od");
+    ESP_RETURN_ON_FALSE(!server->in_use, ESP_ERR_INVALID_STATE, TAG, "server already started");
 
-    for (size_t i = 0; i < N_ELEMS(server_instances); ++i) {
-        if (server_instances[i].in_use && server_instances[i].node_id == node_id) {
-            return ESP_ERR_INVALID_STATE;
-        }
+    memset(server, 0, sizeof(*server));
+    server->in_use = true;
+    server->node_id = node_id;
+    server->cobid_req = 0x600u + node_id;
+    server->cobid_resp = 0x580u + node_id;
+    server->od = od;
+    server->od_len = od_len;
+    server_reset_transfer(server);
+
+    esp_err_t err = canopen_register_handler(server->cobid_req,
+                                             canopen_server_sdo_handler,
+                                             server,
+                                             &server->handle);
+    if (err != ESP_OK) {
+        memset(server, 0, sizeof(*server));
     }
-
-    for (size_t i = 0; i < N_ELEMS(server_instances); ++i) {
-        if (!server_instances[i].in_use) {
-            server_instances[i].in_use = true;
-            server_instances[i].node_id = node_id;
-            server_instances[i].cobid_req = cobid_req;
-            server_instances[i].cobid_resp = cobid_resp;
-            server_instances[i].handle = NULL;
-            server_reset_transfer(&server_instances[i]);
-
-            esp_err_t err = canopen_register_handler(cobid_req,
-                                                     canopen_server_sdo_handler,
-                                                     &server_instances[i],
-                                                     &server_instances[i].handle);
-            if (err != ESP_OK) {
-                memset(&server_instances[i], 0, sizeof(server_instances[i]));
-                return err;
-            }
-
-            return ESP_OK;
-        }
-    }
-
-    return ESP_ERR_NO_MEM;
+    return err;
 }
 
-esp_err_t canopen_server_stop(uint8_t node_id)
+esp_err_t canopen_server_stop(canopen_server_t *server)
 {
-    for (size_t i = 0; i < N_ELEMS(server_instances); ++i) {
-        if (server_instances[i].in_use && server_instances[i].node_id == node_id) {
-            esp_err_t err = ESP_OK;
+    esp_err_t err = ESP_OK;
 
-            if (server_instances[i].handle != NULL) {
-                err = canopen_unregister_handler(server_instances[i].handle);
-            }
+    ESP_RETURN_ON_FALSE(server != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL server");
+    ESP_RETURN_ON_FALSE(server->in_use, ESP_ERR_INVALID_STATE, TAG, "server not started");
 
-            memset(&server_instances[i], 0, sizeof(server_instances[i]));
-            return err;
-        }
+    if (server->handle != NULL) {
+        err = canopen_unregister_handler(server->handle);
     }
-
-    return ESP_ERR_NOT_FOUND;
+    memset(server, 0, sizeof(*server));
+    return err;
 }

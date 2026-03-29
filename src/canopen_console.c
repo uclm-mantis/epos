@@ -30,6 +30,7 @@ static const char *TAG = "cia309";
 static TaskHandle_t usb_console_task_handle;
 static TaskHandle_t tcp_console_task_handle;
 
+
 /*
     CiA 309-3 ASCII console
 
@@ -49,15 +50,20 @@ static TaskHandle_t tcp_console_task_handle;
 #define CT(datatype, ctype, scan_sfx, print_sfx) \
 static void parse_##ctype(const char* str, void* buf)  { *(ctype*)buf = (ctype)strto##scan_sfx(str, NULL, 0); } \
 static void print_##ctype(void* buf) { printf("%" #print_sfx, *(ctype*)buf); }
-#define CTA(datatype, ctype, scan_sfx, print_sfx) 
+#define CTA(datatype, ctype, scan_sfx, print_sfx) \
+static void parse_##datatype##_t(const char* str, void* buf)  { *(ctype*)buf = (ctype)strto##scan_sfx(str, NULL, 0); } \
+static void print_##datatype##_t(void* buf) { printf("%" #print_sfx, *(ctype*)buf); }
 #include "canopen_console_types.h"
 static void parse_string8_t(const char* str, void* buf) { *(uint64_t*)buf = *(uint64_t*)str; }
 static void print_string8_t(void* buf) { printf("%s", (char*)buf); }
 
+#define PARSE_FN(fn,t) IF_ELSE(IS_NA(fn)) ( NULL ) ( parse_##t )
+#define PRINT_FN(fn,t) IF_ELSE(IS_NA(fn)) ( NULL ) ( print_##t )
+
 // type information for console
 #define CT(datatype, ctype, scan_sfx, print_sfx) static const char ctype##_abbr[] = #datatype;
 #define CTS(datatype, ctype) static const char ctype##_abbr[] = #datatype;
-#define CTA(datatype, ctype, scan_sfx, print_sfx)
+#define CTA(datatype, ctype, scan_sfx, print_sfx) static const char datatype##_abbr[] = #datatype;
 #include "canopen_console_types.h"
 #define CiA309type(type) type##_abbr
 
@@ -83,8 +89,9 @@ struct {
     size_t size;
     void (*parse)(const char* str, void* buf);
     void (*print)(void* buf);
-} by_type[] = {
+} by_type[] = { 
 #define CT(datatype, ctype, scan_sfx, print_sfx) { #datatype, sizeof(ctype), parse_##ctype, print_##ctype },
+#define CTA(datatype, ctype, scan_sfx, print_sfx) { #datatype, sizeof(ctype), parse_##datatype##_t, print_##datatype##_t },
 #define CTS(datatype, ctype) { #datatype, sizeof(ctype), parse_##ctype, print_##ctype },
 #include "canopen_console_types.h"
 };
@@ -659,6 +666,9 @@ static void completion_callback(const char *buf, linenoiseCompletions *lc)
         }
     }
 }
+
+void canopen_console_task(void *arg);
+void tcp_console_task(void *arg);
 
 void canopen_console_init(const canopen_console_cfg_t* cfg)
 {

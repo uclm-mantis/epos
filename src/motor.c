@@ -1,6 +1,7 @@
 #include "motor.h"
 #include "epos_types.h"
 #include "canopen.h"
+#include "epos_motor.h"
 #include "esp_err.h"
 #include "esp_check.h"
 #include "freertos/FreeRTOS.h"
@@ -426,7 +427,7 @@ esp_err_t
 motor_reset(Motor_t* self)
 {
     ESP_RETURN_ON_ERROR(nmt_reset_node(self->node), TAG, "Unable to NMT reset");
-    ESP_RETURN_ON_ERROR(epos_wait_until(0x700 + self->node, NULL), TAG, "Did not receive NMT bootup");
+    ESP_RETURN_ON_ERROR(canopen_wait_until(0x700 + self->node, NULL), TAG, "Did not receive NMT bootup");
 
     DeviceState_t state;
     ESP_RETURN_ON_ERROR(motor_get_device_state(self, &state), TAG, "Unable to get initial state");
@@ -462,7 +463,8 @@ motor_activate_async_notifications(Motor_t* self, motor_async_callback cb, void*
     ESP_RETURN_ON_ERROR(set_1st_mapped_object_in_txpdo_1(self->node, txpdo_position_actual_value), TAG, "Unable to wr txPDO1 obj1");
     ESP_RETURN_ON_ERROR(set_2nd_mapped_object_in_txpdo_1(self->node, txpdo_statusword), TAG, "Unable to wr txPDO1 obj2");
     ESP_RETURN_ON_ERROR(set_3rd_mapped_object_in_txpdo_1(self->node, txpdo_current_actual_value_averaged), TAG, "Unable to wr txPDO1 obj3");
-    ESP_RETURN_ON_ERROR(epos_register_canopen_handler(0x180 + self->node, (canopen_handler_fn)cb, context), TAG, "Unable to setup txPDO1 cb");
+    canopen_handler_handle_t handler = NULL;
+    ESP_RETURN_ON_ERROR(canopen_register_handler(0x180 + self->node, (canopen_handler_fn)cb, context, &handler), TAG, "Unable to setup txPDO1 cb");
     ESP_RETURN_ON_ERROR(nmt_start_remote_node(self->node), TAG, "Unable to -> operational");
     return ESP_OK;
 }
