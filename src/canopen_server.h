@@ -77,6 +77,25 @@ typedef struct {
         .set = CANOPEN_SERVER_SETTER_WRAPPER(setter), \
     }
 
+// convenience macros to define the OD from an OBJ(...) table, reusing the same getter/setter names
+#define OBJ_SERVER_DECLARE_GETTER(index, subindex, description, symbol, type, rxpdo, txpdo, getter, setter) \
+    CANOPEN_SERVER_DECLARE_GETTER(getter, type)
+#define OBJ_SERVER_DECLARE_SETTER(index, subindex, description, symbol, type, rxpdo, txpdo, getter, setter) \
+    CANOPEN_SERVER_DECLARE_SETTER(setter, type)
+
+#define OBJ_SERVER_DEFINE_GETTER_WRAPPER(index, subindex, description, symbol, type, rxpdo, txpdo, getter, setter) \
+    CANOPEN_SERVER_DEFINE_GETTER_WRAPPER(getter, type)
+#define OBJ_SERVER_DEFINE_SETTER_WRAPPER(index, subindex, description, symbol, type, rxpdo, txpdo, getter, setter) \
+    CANOPEN_SERVER_DEFINE_SETTER_WRAPPER(setter, type)
+
+#define OBJ_SERVER_GETTER_WRAPPER(idx, subidx, desc, symbol, type, rxpdo, txpdo, getter, setter) \
+    CANOPEN_SERVER_GETTER_WRAPPER(getter, type)
+#define OBJ_SERVER_SETTER_WRAPPER(idx, subidx, desc, symbol, type, rxpdo, txpdo, getter, setter) \
+    CANOPEN_SERVER_SETTER_WRAPPER(setter, type)
+
+#define OBJ_SERVER_OD_ENTRY(idx, subidx, desc, symbol, type, rxpdo, txpdo, getter, setter) \
+    CANOPEN_SERVER_OD_ENTRY(idx, subidx, type, getter, setter),
+
 /* Explicit server instance: the application passes the OD at startup. */
 typedef struct {
     bool in_use;

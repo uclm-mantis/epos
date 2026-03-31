@@ -1,4 +1,4 @@
-#include "epos.h"
+#include "canopen.h"
 #include "EposCAN.hh"
 
 

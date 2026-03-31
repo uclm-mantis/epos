@@ -18,7 +18,6 @@
 
 #include "canopen.h"
 #include "canopen_console.h"
-#include "epos.h"
 #include "motor.h"
 #include "motor_console.h"
 #include "esp_debug_helpers.h"

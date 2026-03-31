@@ -3,7 +3,6 @@
 #include "argtable3/argtable3.h"
 #include "motor.h"
 #include "epos_motor.h"
-#include "epos.h"
 #include "esp_check.h"
 #include <string.h>
 

@@ -12,8 +12,8 @@
 extern "C" {
 #endif
 
-#define DEFAULT_CAN_TX 17
-#define DEFAULT_CAN_RX 18
+#define DEFAULT_CAN_TX 21
+#define DEFAULT_CAN_RX 20
 
 typedef void (*canopen_handler_fn)(uint32_t cobid, void *data, void *context);
 
