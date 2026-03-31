@@ -65,6 +65,13 @@ extern "C" {
 #define OBJ_CLIENT_DEFINE_SETTER(index, subindex, description, symbol, type, rxpdo, txpdo, getter, setter) \
     CANOPEN_CLIENT_DEFINE_SETTER(setter, index, subindex, type)
 
+#define OBJ_CLIENT_DECLARE(index, subindex, description, symbol, type, rxpdo, txpdo, getter, setter) \
+    CANOPEN_CLIENT_DECLARE_GETTER(getter, index, subindex, type) \
+    CANOPEN_CLIENT_DECLARE_SETTER(setter, index, subindex, type)
+#define OBJ_CLIENT_DEFINE(index, subindex, description, symbol, type, rxpdo, txpdo, getter, setter) \
+    CANOPEN_CLIENT_DEFINE_GETTER(getter, index, subindex, type) \
+    CANOPEN_CLIENT_DEFINE_SETTER(setter, index, subindex, type)
+
 #ifdef __cplusplus
 }
 #endif
