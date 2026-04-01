@@ -15,6 +15,7 @@
 #include "canopen.h"
 #include "canopen_client.h"
 #include "canopen_console.h"
+#include "canopen_console_types.h"
 #include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -46,32 +47,35 @@ static TaskHandle_t tcp_console_task_handle;
 
 #define N_ELEMS(x) (sizeof(x)/sizeof(x[0]))
 
-// parsers and printers for supported datatypes
+// parsers, printers, type information for supported datatypes
+// suport functions and variables for standard CiA 309-3 datatypes
 #define CT(datatype, ctype, scan_sfx, print_sfx) \
-static void parse_##ctype(const char* str, void* buf)  { *(ctype*)buf = (ctype)strto##scan_sfx(str, NULL, 0); } \
-static void print_##ctype(void* buf) { printf("%" #print_sfx, *(ctype*)buf); }
+    static void parse_##ctype(const char* str, void* buf)  { *(ctype*)buf = (ctype)strto##scan_sfx(str, NULL, 0); } \
+    static void print_##ctype(void* buf) { printf("%" #print_sfx, *(ctype*)buf); } \
 #define CTA(datatype, ctype, scan_sfx, print_sfx) \
-static void parse_##datatype##_t(const char* str, void* buf)  { *(ctype*)buf = (ctype)strto##scan_sfx(str, NULL, 0); } \
-static void print_##datatype##_t(void* buf) { printf("%" #print_sfx, *(ctype*)buf); }
-#include "canopen_console_types.h"
-static void parse_string8_t(const char* str, void* buf) { *(uint64_t*)buf = *(uint64_t*)str; }
-static void print_string8_t(void* buf) { printf("%s", (char*)buf); }
+    static void parse_##datatype##_t(const char* str, void* buf)  { *(ctype*)buf = (ctype)strto##scan_sfx(str, NULL, 0); } \
+    static void print_##datatype##_t(void* buf) { printf("%" #print_sfx, *(ctype*)buf); } \
+#define CTS(datatype, ctype) \
+    static void parse_##ctype(const char* str, void* buf) { *(uint64_t*)buf = *(uint64_t*)str; } \
+    static void print_##ctype(void* buf) { printf("%s", (char*)buf); } \
+CANOPEN_CONSOLE_TYPES(CT, CTA, CTS)
 
-#define PARSE_FN(fn,t) IF_ELSE(IS_NA(fn)) ( NULL ) ( parse_##t )
-#define PRINT_FN(fn,t) IF_ELSE(IS_NA(fn)) ( NULL ) ( print_##t )
 
-// type information for console
-#define CT(datatype, ctype, scan_sfx, print_sfx) static const char ctype##_abbr[] = #datatype;
-#define CTS(datatype, ctype) static const char ctype##_abbr[] = #datatype;
-#define CTA(datatype, ctype, scan_sfx, print_sfx) static const char datatype##_abbr[] = #datatype;
-#include "canopen_console_types.h"
-#define CiA309type(type) type##_abbr
+// individual console type descriptors
+#define ENTRY_T_DEF(datatype, ctype, scan_sfx, print_sfx) \
+    { #datatype, sizeof(ctype), parse_##ctype, print_##ctype },
+#define ENTRY_A_DEF(datatype, ctype, scan_sfx, print_sfx) \
+    { #datatype, sizeof(ctype), parse_##datatype##_t, print_##datatype##_t },
+#define ENTRY_S_DEF(datatype, ctype) \
+    { #datatype, 8, parse_##ctype, print_##ctype },
+canopen_type_entry_t by_type[] = {
+    CANOPEN_CONSOLE_TYPES(ENTRY_T_DEF, ENTRY_A_DEF, ENTRY_S_DEF)
+};
 
-#define R(o) ((o)->print ? 'R' : '-')
-#define W(o) ((o)->parse ? 'W' : '-')
+#define R(o) ((o)->readable ? 'R' : '-')
+#define W(o) ((o)->writable ? 'W' : '-')
 
 /*
-    The object dictionary is only needed for easier interactive console. It is not needed for programmatic behaviours.
     We introduce the following non-standard syntax:
 
     write control_word 4    Write object control_word 
@@ -79,22 +83,8 @@ static void print_string8_t(void* buf) { printf("%s", (char*)buf); }
     help contr              Shows information on all objects startinng with 'contr'
  */
 
-object_dictionary_entry_t od[] = {
-#define OBJ(idx,sidx,d,i,t,rp,tp,r,w) { .id = #i, .index = idx, .subindex = sidx, .type = CiA309type(t), .size = sizeof(t), .parse = PARSE_FN(w,t), .print = PRINT_FN(r,t) },
-#include "client_od.h"
-};
-
-struct {
-    const char* datatype;
-    size_t size;
-    void (*parse)(const char* str, void* buf);
-    void (*print)(void* buf);
-} by_type[] = { 
-#define CT(datatype, ctype, scan_sfx, print_sfx) { #datatype, sizeof(ctype), parse_##ctype, print_##ctype },
-#define CTA(datatype, ctype, scan_sfx, print_sfx) { #datatype, sizeof(ctype), parse_##datatype##_t, print_##datatype##_t },
-#define CTS(datatype, ctype) { #datatype, sizeof(ctype), parse_##ctype, print_##ctype },
-#include "canopen_console_types.h"
-};
+static object_dictionary_entry_t* od = NULL;
+static size_t od_len = 0;
 
 
 // command context -------------------------------------------
@@ -175,7 +165,7 @@ void print_result_int(int value) {
 
 void print_result_value(object_dictionary_entry_t* obj, object_value_t* value) {
     printf("[%d] ", ctx.sequence);
-    obj->print(value);
+    obj->type->print(value);
     printf("\r\n");
 }
 
@@ -187,11 +177,20 @@ void print_result_error(const char *msg) {
     printf("[%d] ERROR:%s\r\n", ctx.sequence, msg);
 }
 
+static canopen_type_entry_t* get_type_by_datatype(const char* datatype) {
+    for (uint8_t i = 0; i < N_ELEMS(by_type); ++i) {
+        if (0 == strcmp(datatype, by_type[i].datatype)) {
+            return &by_type[i];
+        }
+    }
+    return NULL;
+}
+
 object_dictionary_entry_t* get_dictionary_entry(const char* sym, const char* datatype)
 {
     static object_dictionary_entry_t ret; // just one entry being read, no need to allocate
     ret.id = NULL;
-    for (size_t i = 0; i < N_ELEMS(od); ++i) {
+    for (size_t i = 0; i < od_len; ++i) {
         if (0 == strcmp(sym, od[i].id)) {
             ret = od[i];
             break;
@@ -201,15 +200,9 @@ object_dictionary_entry_t* get_dictionary_entry(const char* sym, const char* dat
     if (ret.id == NULL) return NULL;
     if (datatype == NULL) return &ret;
 
-    // type may be overriden by user (e.g. hex print)
-    for (uint8_t i = 0; i < N_ELEMS(by_type); ++i) {
-        if (0 == strcmp(datatype, by_type[i].datatype)) {
-            ret.size = by_type[i].size;
-            ret.parse = by_type[i].parse;
-            ret.print = by_type[i].print;
-            break;
-        }
-    }
+    canopen_type_entry_t* type = get_type_by_datatype(datatype);
+    ret.type = type ? type : &by_type[x32_type_info]; // default to int32_t if datatype not found
+
     return &ret;
 }
 
@@ -218,24 +211,17 @@ static object_dictionary_entry_t* get_object_entry(uint16_t index, uint8_t subin
     static object_dictionary_entry_t ret; // just one entry being read, no need to allocate
     ret.index = index;
     ret.subindex = subindex;
-
-    ret.parse = &parse_int32_t;
-    ret.print = &print_x32_t;
-    ret.size = 4;
-    for (uint8_t i = 0; i < N_ELEMS(by_type); ++i) {
-        if (0 == strcmp(datatype, by_type[i].datatype)) {
-            ret.size = by_type[i].size;
-            ret.parse = by_type[i].parse;
-            ret.print = by_type[i].print;
-            break;
-        } 
-    }
+    canopen_type_entry_t* type = get_type_by_datatype(datatype);
+    ret.type = type ? type : &by_type[x32_type_info]; // default to int32_t if datatype not found
     return &ret;
 }
 
-
 static void read_object(object_dictionary_entry_t* obj) 
 {
+    if (!obj->readable) {
+        print_result_error("Object not readable");
+        return -1;
+    }
     object_value_t value;
     esp_err_t err = sdo_upload(0x600 + ctx.node, obj->index, obj->subindex, &value);
     if (err == ESP_OK) print_result_value(obj, &value);
@@ -244,6 +230,10 @@ static void read_object(object_dictionary_entry_t* obj)
 
 static void write_object(object_dictionary_entry_t* obj, object_value_t* value) 
 { 
+    if (!obj->writable) {
+        print_result_error("Object not writable");
+        return -1;
+    }
     esp_err_t err = sdo_download(0x600 + ctx.node, obj->index, obj->subindex, value, obj->size);
     if (err == ESP_OK) print_result_ok();
     else print_result_error("Unsuccessful SDO download");
@@ -301,7 +291,7 @@ static int cmd_write_sym(int argc, char **argv)
     }
 
     object_value_t value;
-    obj->parse(svalue, &value);
+    obj->type->parse(svalue, &value);
     write_object(obj, &value);
     return 0;
 }
@@ -323,7 +313,7 @@ static int cmd_write(int argc, char **argv)
 
     object_dictionary_entry_t* obj = get_object_entry(index, subindex, datatype);
     object_value_t value;
-    obj->parse(sval, &value);
+    obj->type->parse(sval, &value);
     write_object(obj, &value);
     return 0;
 }
@@ -513,16 +503,16 @@ static int cmd_about(int argc, char **argv)
                     "  vs                 # visible string.\r\n");
         } else if (strcasecmp(topic, "object") == 0) {
             printf( "Available objects:\r\n");
-            for (size_t i = 0; i < N_ELEMS(od); ++i) {
+            for (size_t i = 0; i < od_len; ++i) {
                 object_dictionary_entry_t* o = &od[i];
-                printf("  %04x %02x %-3s %c%c %s\r\n", o->index, o->subindex, o->type, R(o), W(o), o->id);
+                printf("  %04x %02x %-3s %c%c %s\r\n", o->index, o->subindex, o->type->datatype, R(o), W(o), o->id);
             }
         } else {
             printf( "Objects starting with %s:\r\n", topic);
-            for (size_t i = 0; i < N_ELEMS(od); ++i) {
+            for (size_t i = 0; i < od_len; ++i) {
                 object_dictionary_entry_t* o = &od[i];
                 if (0 == strncmp(o->id, topic, strlen(topic)))
-                    printf("  %04x %02x %-3s %c%c %s\r\n", o->index, o->subindex, o->type, (o->print?'R':' '), (o->parse?'W':' '), o->id);
+                    printf("  %04x %02x %-3s %c%c %s\r\n", o->index, o->subindex, o->type->datatype, R(o), W(o), o->id);
             }
             return 1;
         }
@@ -634,7 +624,7 @@ static void suggest_completions(const char *cmd, const char* sym, linenoiseCompl
 {
     size_t len = strlen(sym);
     if (len == 0) return;
-    for (size_t i = 0; i < N_ELEMS(od); i++) {
+    for (size_t i = 0; i < od_len; i++) {
         bool maybe = (read && od[i].print) || (write && od[i].parse);
         if (maybe && strncmp(sym, od[i].id, len) == 0) {
             char line[256];
@@ -721,6 +711,10 @@ void canopen_console_init(const canopen_console_cfg_t* cfg)
     linenoiseHistorySetMaxLen(100);
     linenoiseSetMaxLineLen(console_config.max_cmdline_length);
     linenoiseAllowEmpty(false);
+
+    od = cfg->object_dictionary;
+    od_len = cfg->object_dictionary_entries;
+    ESP_LOGI(TAG, "Console initialized with %d object dictionary entries", (int)od_len);
 
     if (cfg->dumb_mode) {
         ESP_LOGI(TAG, "Dumb mode enabled. Line editing and history features are disabled, but ANSI escape codes will be printed (e.g. colors).");
