@@ -29,7 +29,7 @@ typedef struct {
     bool dumb_mode;
     bool enable_usb_console;
     bool enable_tcp_console;
-    object_dictionary_entry_t* object_dictionary;
+    const object_dictionary_entry_t* object_dictionary;
     size_t object_dictionary_entries;
 } canopen_console_cfg_t;
 
@@ -97,27 +97,32 @@ void canopen_console_init(const canopen_console_cfg_t* cfg);
 extern canopen_type_entry_t by_type[];
 
  // enumeration for type descriptors
-#define ENTRY_T_ENUM(datatype, ctype, scan_sfx, print_sfx) datatype##_type_info,
-#define ENTRY_A_ENUM(datatype, ctype, scan_sfx, print_sfx) datatype##_type_info,
-#define ENTRY_S_ENUM(datatype, ctype) datatype##_type_info,
+#define ENTRY_T_ENUM(datatype, ctype, scan_sfx, print_sfx) \
+    datatype##_type_info, \
+    ctype##_type_info = datatype##_type_info, 
+#define ENTRY_A_ENUM(datatype, ctype, scan_sfx, print_sfx) \
+    datatype##_type_info,
+#define ENTRY_S_ENUM(datatype, ctype) \
+    datatype##_type_info, \
+    ctype##_type_info = datatype##_type_info, 
 enum {
     CANOPEN_CONSOLE_TYPES(ENTRY_T_ENUM, ENTRY_A_ENUM, ENTRY_S_ENUM)
 };
 
-#define OBJ_CONSOLE_OD_ENTRY(index, subindex, description, symbol, type, rxpdo, txpdo, getter, setter) \
+#define OBJ_CONSOLE_OD_ENTRY(idx, subidx, description, symbol, typ, rxpdo, txpdo, getter, setter) \
     { \
         .id = #symbol, \
-        .index = index, \
-        .subindex = subindex, \
-        .type = &by_type[type##_type_info], \
-        .readable = (getter != NULL), \
-        .writable = (setter != NULL), \
+        .index = idx, \
+        .subindex = subidx, \
+        .type = &by_type[typ##_type_info], \
+        .readable = IF_ELSE(IS_NA(getter)) ( false ) ( true ), \
+        .writable = IF_ELSE(IS_NA(setter)) ( false ) ( true ), \
     },
 
 // instantiates an object dictionary array from a CANOPEN_OD table, to be passed to the console at init
-#define CANOPEN_CONSOLE_OBJECT_DICTIONARY(CANOPEN_OD, name) \
-    const object_dictionary_entry_t name[] = { \
-        CANOPEN_OD(OBJ_CONSOLE_OD_ENTRY) \
+#define CANOPEN_CONSOLE_OBJECT_DICTIONARY(OD, name) \
+    static const object_dictionary_entry_t name[] = { \
+        OD(OBJ_CONSOLE_OD_ENTRY) \
     }; \
     const size_t name##_len = sizeof(name) / sizeof(name[0]);
 

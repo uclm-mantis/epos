@@ -69,7 +69,7 @@ git submodule update --init --recursive
 5. Include in your sketch:
 
 ```cpp
-#include <EposCAN.h>
+#include <EposCAN.hh>
 ```
 
 #### Method 2: Manual Installation
@@ -102,6 +102,27 @@ void app_main(void)
     ESP_ERROR_CHECK(nmt_reset_node(2));
     vTaskDelay(pdMS_TO_TICKS(1000));
     ESP_ERROR_CHECK(nmt_start_remote_node(2));
+}
+```
+
+## C++ wrapper
+
+The `EposCAN.hh` header provides a thin C++ wrapper around the same CANopen core.
+
+```cpp
+#include "EposCAN.hh"
+
+void app_main()
+{
+    EPOS::CAN bus;
+    bus.begin(true, 3000, true);
+
+    bus.NMT.reset_node(2);
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    bus.NMT.start_remote_node(2);
+
+    int16_t status = bus.SDO.upload<int16_t>(2, 0x6041, 0);
+    bus.PDO.send<uint16_t>(2, 1, 0x1234);
 }
 ```
 
@@ -495,8 +516,11 @@ uint32_t canopen_od_status_to_abort_code(canopen_od_status_t st);
 ### Lifecycle
 
 ```c
-esp_err_t canopen_server_start(uint8_t node_id);
-esp_err_t canopen_server_stop(uint8_t node_id);
+esp_err_t canopen_server_start(canopen_server_t *server,
+                               uint8_t node_id,
+                               const canopen_server_od_entry_t *od,
+                               size_t od_len);
+esp_err_t canopen_server_stop(canopen_server_t *server);
 ```
 
 - `canopen_server_start()` registers the SDO request handler for `0x600 + node_id` and responds through `0x580 + node_id`.
@@ -507,17 +531,23 @@ Up to 8 concurrent server instances are currently supported.
 ### Direct OD access
 
 ```c
-canopen_od_status_t canopen_server_od_get(uint16_t index,
+canopen_od_status_t canopen_server_od_get(const canopen_server_od_entry_t *od,
+                                          size_t od_len,
+                                          uint16_t index,
                                           uint8_t subindex,
                                           void *value,
                                           size_t size);
 
-canopen_od_status_t canopen_server_od_set(uint16_t index,
+canopen_od_status_t canopen_server_od_set(const canopen_server_od_entry_t *od,
+                                          size_t od_len,
+                                          uint16_t index,
                                           uint8_t subindex,
                                           const void *value,
                                           size_t size);
 
-const canopen_server_od_entry_t *canopen_server_find(uint16_t index,
+const canopen_server_od_entry_t *canopen_server_find(const canopen_server_od_entry_t *od,
+                                                     size_t od_len,
+                                                     uint16_t index,
                                                      uint8_t subindex);
 ```
 
@@ -526,7 +556,8 @@ These functions are useful both inside and outside the SDO protocol.
 ### Explicit dispatcher
 
 ```c
-esp_err_t canopen_server_dispatch_sdo(uint32_t cobid_req,
+esp_err_t canopen_server_dispatch_sdo(canopen_server_t *server,
+                                      uint32_t cobid_req,
                                       const void *req,
                                       size_t req_size,
                                       uint32_t *cobid_resp,
@@ -567,10 +598,14 @@ typedef struct {
     bool dumb_mode;
     bool enable_usb_console;
     bool enable_tcp_console;
+    const object_dictionary_entry_t *object_dictionary;
+    size_t object_dictionary_entries;
 } canopen_console_cfg_t;
 ```
 
 Default configuration enables the USB console and disables the TCP console. The TCP console listens on port 3344.
+
+Use `CANOPEN_CONSOLE_DEFAULT()` for a default configuration; passing `NULL` to `canopen_console_init()` applies it automatically.
 
 ### Supported commands
 
@@ -692,15 +727,62 @@ void app_main(void)
 
 ## Building APIs from EDS / OD files
 
-The project can be used beyond Maxon EPOS devices. CANopen Electronic Data Sheet (EDS files, CiA 306-1) provide a full description of the capabilities of a device. You may use `eds_to_od.py` python script to extract the information from the EDS into a simple object dictionary table. Then, you may use `extract.py` python script to automatically generate an API customized for your device. 
+The project can be used beyond Maxon EPOS devices. CANopen Electronic Data Sheet (EDS files, CiA 306-1) provide a full description of the capabilities of a device. You may use `eds_to_od.py` python script to extract the information from the EDS and generate an API customized for your device.  It may also be used to generate a simple object dictionary table in CSV. This makes it practical to generate support for custom CANopen devices from EDS-derived tables.
 
-- `client_od.h` is intended to aggregate one or more client-side object dictionary headers.
-- `server_od.h` is intended to aggregate one or more server-side object dictionary headers.
-- The generated macros in `canopen_client.h` and `canopen_server.h` turn those OD entries into typed client and server APIs.
+See [MiniIO Demo](https://github.com/uclm-mantis/canopen-demo) as an example of a custom object dictionary with automatically generated typed API, dictionary introspection and name completion in the console.
 
-This makes it practical to generate support for custom CANopen devices from EDS-derived tables.
+Start with an EDS file and generate the corresponding header. For example, in this repository you may run:
 
+``` sh
+python py\eds_to_od.py data\maxon_EPOS2.eds
+```
 
+This command will produce `src/maxon_EPOS2_od.h` with the following content:
+
+``` c
+#pragma once
+// DO NOT EDIT. This file is autogenerated from 'maxon_EPOS2.eds'
+#include <stdint.h>
+#include <stdbool.h>
+// Format: OBJ(index, subindex, desc, identifier, type, rxPDO, txPDO, getter, setter)
+#define MAXON_EPOS2_OD(OBJ) \
+    OBJ(0x1000, 0x0, "Device Type", device_type, uint32_t, 0, 0, get_device_type, NA) \
+    OBJ(0x1001, 0x0, "Error Register", error_register, uint8_t, 0, 0, get_error_register, NA) \
+    OBJ(0x1003, 0x0, "Number of Errors", number_of_errors, uint8_t, 0, 0, get_number_of_errors, set_number_of_errors) \
+...
+```
+
+The macro `MAXON_EPOS2_OD` may be used to generate multiple client-side and server-side artifacts. For example, the typed client-side API may be generated with:
+
+``` c
+MAXON_EPOS2_OD(OBJ_CLIENT_DEFINE)
+```
+
+If you neew only the declarations for a public header:
+
+``` c
+MAXON_EPOS2_OD(OBJ_CLIENT_DECLARE)
+```
+
+Likewise, if you need to generate the server-side:
+
+``` c
+MAXON_EPOS2_OD(OBJ_SERVER_DEFINE)
+
+const canopen_server_od_entry_t epos2_server_od[] = {
+    MAXON_EPOS2_OD(OBJ_SERVER_OD_ENTRY)
+};
+const size_t epos2_server_od_len = sizeof(epos2_server_od) / sizeof(epos2_server_od[0]);
+```
+
+> [!NOTE]
+> Note that it extremely easy to combine several object dictionaries in a single one. This is a useful feature to provide protocol extensions.
+>
+> ``` c
+> #define COMBINED_OD(OBJ) \
+>    MAXON_EPOS2_OD(OBJ) \
+>    CUSTOM_OD(OBJ)
+> ```
 
 ## Acknowledgements
 
