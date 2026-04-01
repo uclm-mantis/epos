@@ -15,7 +15,6 @@
 #include "canopen.h"
 #include "canopen_client.h"
 #include "canopen_console.h"
-#include "canopen_console_types.h"
 #include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -51,13 +50,13 @@ static TaskHandle_t tcp_console_task_handle;
 // suport functions and variables for standard CiA 309-3 datatypes
 #define CT(datatype, ctype, scan_sfx, print_sfx) \
     static void parse_##ctype(const char* str, void* buf)  { *(ctype*)buf = (ctype)strto##scan_sfx(str, NULL, 0); } \
-    static void print_##ctype(void* buf) { printf("%" #print_sfx, *(ctype*)buf); } \
+    static void print_##ctype(void* buf) { printf("%" #print_sfx, *(ctype*)buf); }
 #define CTA(datatype, ctype, scan_sfx, print_sfx) \
     static void parse_##datatype##_t(const char* str, void* buf)  { *(ctype*)buf = (ctype)strto##scan_sfx(str, NULL, 0); } \
-    static void print_##datatype##_t(void* buf) { printf("%" #print_sfx, *(ctype*)buf); } \
+    static void print_##datatype##_t(void* buf) { printf("%" #print_sfx, *(ctype*)buf); }
 #define CTS(datatype, ctype) \
     static void parse_##ctype(const char* str, void* buf) { *(uint64_t*)buf = *(uint64_t*)str; } \
-    static void print_##ctype(void* buf) { printf("%s", (char*)buf); } \
+    static void print_##ctype(void* buf) { printf("%s", (char*)buf); }
 CANOPEN_CONSOLE_TYPES(CT, CTA, CTS)
 
 
@@ -220,7 +219,7 @@ static void read_object(object_dictionary_entry_t* obj)
 {
     if (!obj->readable) {
         print_result_error("Object not readable");
-        return -1;
+        return;
     }
     object_value_t value;
     esp_err_t err = sdo_upload(0x600 + ctx.node, obj->index, obj->subindex, &value);
@@ -232,9 +231,9 @@ static void write_object(object_dictionary_entry_t* obj, object_value_t* value)
 { 
     if (!obj->writable) {
         print_result_error("Object not writable");
-        return -1;
+        return;
     }
-    esp_err_t err = sdo_download(0x600 + ctx.node, obj->index, obj->subindex, value, obj->size);
+    esp_err_t err = sdo_download(0x600 + ctx.node, obj->index, obj->subindex, value, obj->type->size);
     if (err == ESP_OK) print_result_ok();
     else print_result_error("Unsuccessful SDO download");
 }
@@ -625,7 +624,7 @@ static void suggest_completions(const char *cmd, const char* sym, linenoiseCompl
     size_t len = strlen(sym);
     if (len == 0) return;
     for (size_t i = 0; i < od_len; i++) {
-        bool maybe = (read && od[i].print) || (write && od[i].parse);
+        bool maybe = (read && od[i].readable) || (write && od[i].writable);
         if (maybe && strncmp(sym, od[i].id, len) == 0) {
             char line[256];
             sprintf(line, "%s%s", cmd, od[i].id);

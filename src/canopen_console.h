@@ -97,11 +97,11 @@ void canopen_console_init(const canopen_console_cfg_t* cfg);
 extern canopen_type_entry_t by_type[];
 
  // enumeration for type descriptors
-#define ENTRY_T_DEF(datatype, ctype, scan_sfx, print_sfx) datatype##_info,
-#define ENTRY_A_DEF(datatype, ctype, scan_sfx, print_sfx) datatype##_info,
-#define ENTRY_S_DEF(datatype, ctype) datatype##_type_info,
+#define ENTRY_T_ENUM(datatype, ctype, scan_sfx, print_sfx) datatype##_type_info,
+#define ENTRY_A_ENUM(datatype, ctype, scan_sfx, print_sfx) datatype##_type_info,
+#define ENTRY_S_ENUM(datatype, ctype) datatype##_type_info,
 enum {
-    CANOPEN_CONSOLE_TYPES(ENTRY_T_DEF, ENTRY_A_DEF, ENTRY_S_DEF)
+    CANOPEN_CONSOLE_TYPES(ENTRY_T_ENUM, ENTRY_A_ENUM, ENTRY_S_ENUM)
 };
 
 #define OBJ_CONSOLE_OD_ENTRY(index, subindex, description, symbol, type, rxpdo, txpdo, getter, setter) \

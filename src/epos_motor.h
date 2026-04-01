@@ -1,24 +1,22 @@
 #pragma once
 
-#include "canopen_console_types.h"
 #include "canopen_client.h"
+#include "maxon_EPOS2_od.h"
 
-#define OBJ(id,sid,d,i,t,rp,tp,r,w) CANOPEN_CLIENT_DECLARE_GETTER(r,id,sid,t)
-#include "client_od.h"
-#undef OBJ
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-#define OBJ(id,sid,d,i,t,rp,tp,r,w) CANOPEN_CLIENT_DECLARE_SETTER(w,id,sid,t)
-#include "client_od.h"
-#undef OBJ
+MAXON_EPOS2_OD(OBJ_CLIENT_DECLARE)
 
-enum {
-#define OBJ(id,sid,d,i,t,rp,tp,r,w) CANOPEN_CLIENT_DECLARE_TX_MAPPING_ENUM(i,tp,id,sid,t)
-#include "client_od.h"
-#undef OBJ
-};
+typedef enum {
+    MAXON_EPOS2_OD(OBJ_CLIENT_DECLARE_TX_MAPPING_ENUM)
+} motor_tpdo_map_t;
 
-enum {
-#define OBJ(id,sid,d,i,t,rp,tp,r,w) CANOPEN_CLIENT_DECLARE_RX_MAPPING_ENUM(i,rp,id,sid,t)
-#include "client_od.h"
-#undef OBJ
-};
+typedef enum {
+    MAXON_EPOS2_OD(OBJ_CLIENT_DECLARE_RX_MAPPING_ENUM)
+} motor_rpdo_map_t;
+
+#ifdef __cplusplus
+}
+#endif
