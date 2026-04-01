@@ -82,7 +82,7 @@ canopen_type_entry_t by_type[] = {
     help contr              Shows information on all objects startinng with 'contr'
  */
 
-static object_dictionary_entry_t* od = NULL;
+static const object_dictionary_entry_t* od = NULL;
 static size_t od_len = 0;
 
 
@@ -503,13 +503,13 @@ static int cmd_about(int argc, char **argv)
         } else if (strcasecmp(topic, "object") == 0) {
             printf( "Available objects:\r\n");
             for (size_t i = 0; i < od_len; ++i) {
-                object_dictionary_entry_t* o = &od[i];
+                const object_dictionary_entry_t* o = &od[i];
                 printf("  %04x %02x %-3s %c%c %s\r\n", o->index, o->subindex, o->type->datatype, R(o), W(o), o->id);
             }
         } else {
             printf( "Objects starting with %s:\r\n", topic);
             for (size_t i = 0; i < od_len; ++i) {
-                object_dictionary_entry_t* o = &od[i];
+                const object_dictionary_entry_t* o = &od[i];
                 if (0 == strncmp(o->id, topic, strlen(topic)))
                     printf("  %04x %02x %-3s %c%c %s\r\n", o->index, o->subindex, o->type->datatype, R(o), W(o), o->id);
             }
