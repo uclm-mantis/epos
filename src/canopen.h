@@ -3,9 +3,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <string.h>
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
-#include "driver/twai.h"
+#include "esp_twai.h"
+#include "esp_twai_onchip.h"
 #include "canopen_types.h"
 
 #ifdef __cplusplus
@@ -14,6 +16,24 @@ extern "C" {
 
 #define DEFAULT_CAN_TX 21
 #define DEFAULT_CAN_RX 20
+
+static inline twai_message_t twai_message_init_std(uint32_t identifier, const void *data, size_t len)
+{
+    twai_message_t msg = {
+        .identifier = identifier,
+        .data_length_code = (uint8_t)len,
+        .extd = false,
+        .rtr = false,
+        .self = false,
+        .ss = false,
+        .dlc_non_comp = false,
+        .data = {0},
+    };
+    if (data != NULL && len > 0 && len <= sizeof(msg.data)) {
+        memcpy(msg.data, data, len);
+    }
+    return msg;
+}
 
 typedef void (*canopen_handler_fn)(uint32_t cobid, void *data, void *context);
 

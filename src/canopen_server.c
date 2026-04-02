@@ -168,17 +168,7 @@ static void sdo_make_abort(uint16_t index,
 
 static esp_err_t canopen_server_send(uint32_t cobid, const void *payload8)
 {
-    twai_message_t msg = {
-        .extd = 0,
-        .rtr = 0,
-        .ss = 0,
-        .self = 0,
-        .dlc_non_comp = 0,
-        .identifier = cobid,
-        .data_length_code = 8,
-    };
-
-    memcpy(msg.data, payload8, 8);
+    twai_message_t msg = twai_message_init_std(cobid, payload8, 8);
     return canopen_post(&msg);
 }
 
