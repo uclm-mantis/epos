@@ -8,7 +8,6 @@
 #include "freertos/semphr.h"
 #include "esp_check.h"
 #include "esp_log.h"
-#include "nvs_flash.h"
 #include "driver/gpio.h"
 
 #define N_ELEMS(x) (sizeof(x)/sizeof((x)[0]))
@@ -68,6 +67,7 @@ static bool enable_dump_msg = false;
 
 static QueueHandle_t rx_msg_queue;
 static QueueHandle_t tx_task_queue;
+static twai_node_handle_t twai_node;
 
 #define CANOPEN_INTERNAL_STOP_ID   0xFFFFFFFFu
 
@@ -75,9 +75,48 @@ static portMUX_TYPE done_mux = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t done_waiter_task = NULL;
 static bool shutdown_requested = false;
 
-static TaskHandle_t rx_task_handle;
 static TaskHandle_t dispatch_task_handle;
 static TaskHandle_t tx_task_handle;
+
+static int canopen_timeout_ms(TickType_t ticks)
+{
+    if (ticks == portMAX_DELAY) {
+        return -1;
+    }
+    uint32_t ms = pdTICKS_TO_MS(ticks);
+    if (ms == 0 && ticks > 0) {
+        ms = 1;
+    }
+    return (int)ms;
+}
+
+static void canopen_msg_to_frame(const twai_message_t *msg, twai_frame_t *frame)
+{
+    memset(frame, 0, sizeof(*frame));
+    frame->header.id = msg->identifier;
+    frame->header.ide = msg->extd ? 1u : 0u;
+    frame->header.rtr = msg->rtr ? 1u : 0u;
+    frame->header.fdf = 0;
+    frame->header.brs = 0;
+    frame->header.dlc = msg->data_length_code;
+    frame->buffer = (uint8_t *)msg->data;
+    frame->buffer_len = msg->data_length_code;
+}
+
+static void canopen_frame_to_msg(const twai_frame_t *frame, twai_message_t *msg)
+{
+    memset(msg, 0, sizeof(*msg));
+    msg->identifier = frame->header.id;
+    msg->extd = frame->header.ide != 0;
+    msg->rtr = frame->header.rtr != 0;
+    msg->data_length_code = (uint8_t)frame->buffer_len;
+    if (msg->data_length_code > sizeof(msg->data)) {
+        msg->data_length_code = sizeof(msg->data);
+    }
+    if (frame->buffer != NULL && msg->data_length_code > 0) {
+        memcpy(msg->data, frame->buffer, msg->data_length_code);
+    }
+}
 
 static bool match_cobid_only(const response_t *self, const twai_message_t *msg)
 {
@@ -126,7 +165,7 @@ static void dump_msg(const char* info, twai_message_t* msg)
 {
     if (enable_dump_msg) {
         uint8_t* d = msg->data;
-        ESP_LOGI("CANOPEN", "%s %08x (%d bytes) %02x %02x %02x %02x %02x %02x %02x %02x",
+        ESP_LOGI(TAG, "%s %08x (%d bytes) %02x %02x %02x %02x %02x %02x %02x %02x",
                  info, (unsigned)msg->identifier, (int)msg->data_length_code,
                  d[0],d[1],d[2],d[3],d[4],d[5],d[6],d[7]);
     }
@@ -270,8 +309,26 @@ esp_err_t canopen_unregister_handler(canopen_handler_handle_t handle)
 
 static void canopen_send_now(request_t* self)
 {
+    twai_frame_t frame;
+    esp_err_t err;
+
+    if (twai_node == NULL) {
+        ESP_LOGE(TAG, "TWAI node not initialized");
+        return;
+    }
+
     dump_msg("Transmit", &self->msg);
-    twai_transmit(&self->msg, portMAX_DELAY);
+    canopen_msg_to_frame(&self->msg, &frame);
+    err = twai_node_transmit(twai_node, &frame, canopen_timeout_ms(max_delay));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "twai_node_transmit failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    err = twai_node_transmit_wait_all_done(twai_node, canopen_timeout_ms(max_delay));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "twai_node_transmit_wait_all_done failed: %s", esp_err_to_name(err));
+    }
 }
 
 static void canopen_send_notify(request_t *self)
@@ -501,7 +558,6 @@ esp_err_t nmt(uint8_t cs, uint8_t n)
     return canopen_send(&msg);
 }
 
-
 void canopen_request_shutdown(void)
 {
     taskENTER_CRITICAL(&done_mux);
@@ -514,6 +570,30 @@ void canopen_request_shutdown(void)
     }
 }
 
+static bool canopen_twainode_rx_done_cb(twai_node_handle_t node, const twai_rx_done_event_data_t *edata, void *user_ctx)
+{
+    (void) edata;
+    (void) user_ctx;
+
+    uint8_t rx_buf[8] = {0};
+    twai_frame_t frame = {
+        .buffer = rx_buf,
+        .buffer_len = sizeof(rx_buf),
+    };
+    twai_message_t msg;
+    BaseType_t high_task_wakeup = pdFALSE;
+
+    if (twai_node_receive_from_isr(node, &frame) != ESP_OK) {
+        return false;
+    }
+
+    canopen_frame_to_msg(&frame, &msg);
+    if (xQueueSendFromISR(rx_msg_queue, &msg, &high_task_wakeup) != pdTRUE) {
+        return false;
+    }
+
+    return high_task_wakeup == pdTRUE;
+}
 
 static void canopen_transmit_task(void *arg)
 {
@@ -547,74 +627,57 @@ static void canopen_dispatch_task(void *arg)
     vTaskDelete(NULL);
 }
 
-static void canopen_receive_task(void *arg)
-{
-    twai_message_t msg;
-
-    for (;;) {
-        esp_err_t err = twai_receive(&msg, portMAX_DELAY);
-
-        bool stop;
-        taskENTER_CRITICAL(&done_mux);
-        stop = shutdown_requested;
-        taskEXIT_CRITICAL(&done_mux);
-
-        if (stop) break;
-
-        if (err != ESP_OK) {
-            continue;
-        }
-
-        if (xQueueSend(rx_msg_queue, &msg, 0) != pdTRUE) {
-            ESP_LOGW(TAG, "RX queue full, dropping CAN frame");
-        }
-    }
-    vTaskDelete(NULL);
-}
-
-static twai_timing_config_t t_config = TWAI_TIMING_CONFIG_1MBITS();
-static twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
-static twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(DEFAULT_CAN_TX, DEFAULT_CAN_RX, TWAI_MODE_NORMAL);
-
-static void initialize_nvs(void)
-{
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK( nvs_flash_erase() );
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
-}
-
 esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
 {
     static canopen_init_cfg_t default_cfg = CANOPEN_INIT_DEFAULT();
+    twai_onchip_node_config_t node_cfg = {0};
+    twai_mask_filter_config_t filter_cfg = {0};
+    twai_event_callbacks_t callbacks = {
+        .on_rx_done = canopen_twainode_rx_done_cb,
+    };
+
     if (cfg == NULL)
         cfg = &default_cfg;
-    g_config.tx_io = (gpio_num_t) cfg->can_tx_pin;
-    g_config.rx_io = (gpio_num_t) cfg->can_rx_pin;
 
     max_delay = pdMS_TO_TICKS(cfg->max_delay_ms);
     enable_dump_msg = cfg->enable_dump_msg;
-
-    initialize_nvs();
-
-    ESP_RETURN_ON_ERROR(twai_driver_install(&g_config, &t_config, &f_config), TAG, "Unable to install TWAI driver");
-    ESP_RETURN_ON_ERROR(twai_start(), TAG, "Unable to start TWAI");
 
     rx_msg_queue = xQueueCreate(16, sizeof(twai_message_t));
     tx_task_queue = xQueueCreate(8, sizeof(request_t));
     canopen_handlers_mutex = xSemaphoreCreateMutex();
     cobid_mutex = xSemaphoreCreateMutex();
 
+    ESP_RETURN_ON_FALSE(rx_msg_queue != NULL && tx_task_queue != NULL &&
+                        canopen_handlers_mutex != NULL && cobid_mutex != NULL,
+                        ESP_ERR_NO_MEM, TAG, "Unable to allocate CANopen resources");
+
+    node_cfg.io_cfg.tx = (gpio_num_t) cfg->can_tx_pin;
+    node_cfg.io_cfg.rx = (gpio_num_t) cfg->can_rx_pin;
+    node_cfg.io_cfg.quanta_clk_out = GPIO_NUM_NC;
+    node_cfg.io_cfg.bus_off_indicator = GPIO_NUM_NC;
+    node_cfg.bit_timing.bitrate = 1000000;
+    node_cfg.tx_queue_depth = 8;
+    node_cfg.fail_retry_cnt = -1;
+    node_cfg.flags.no_receive_rtr = 1;
+
+    ESP_RETURN_ON_ERROR(twai_new_node_onchip(&node_cfg, &twai_node), TAG, "Unable to create TWAI node");
+    ESP_RETURN_ON_ERROR(twai_node_register_event_callbacks(twai_node, &callbacks, NULL), TAG, "Unable to register TWAI callbacks");
+
+    filter_cfg.id = 0;
+    filter_cfg.mask = 0;
+    filter_cfg.is_ext = 0;
+    filter_cfg.no_classic = 0;
+    filter_cfg.no_fd = 1;
+    ESP_RETURN_ON_ERROR(twai_node_config_mask_filter(twai_node, 0, &filter_cfg), TAG, "Unable to configure TWAI filter");
+    ESP_RETURN_ON_ERROR(twai_node_enable(twai_node), TAG, "Unable to enable TWAI node");
+
     taskENTER_CRITICAL(&done_mux);
     shutdown_requested = false;
     done_waiter_task = NULL;
     taskEXIT_CRITICAL(&done_mux);
 
-    xTaskCreatePinnedToCore(canopen_receive_task, "receive",   4096, NULL,  8, &rx_task_handle, tskNO_AFFINITY);
     xTaskCreatePinnedToCore(canopen_dispatch_task, "dispatch", 4096, NULL, 8, &dispatch_task_handle, tskNO_AFFINITY);
-    xTaskCreatePinnedToCore(canopen_transmit_task, "transmit", 4096, NULL,  9, &tx_task_handle, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(canopen_transmit_task, "transmit", 4096, NULL, 9, &tx_task_handle, tskNO_AFFINITY);
 
     return ESP_OK;
 }
@@ -653,7 +716,9 @@ esp_err_t canopen_wait_shutdown(void)
         (void) ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     }
 
-    ESP_RETURN_ON_ERROR(twai_stop(), TAG, "Unable to stop TWAI");
+    if (twai_node != NULL) {
+        ESP_RETURN_ON_ERROR(twai_node_disable(twai_node), TAG, "Unable to disable TWAI node");
+    }
 
     twai_message_t stop_msg = {
         .identifier = CANOPEN_INTERNAL_STOP_ID,
@@ -668,7 +733,10 @@ esp_err_t canopen_wait_shutdown(void)
 
     vTaskDelay(pdMS_TO_TICKS(20));
 
-    ESP_RETURN_ON_ERROR(twai_driver_uninstall(), TAG, "Unable to uninstall TWAI driver");
+    if (twai_node != NULL) {
+        ESP_RETURN_ON_ERROR(twai_node_delete(twai_node), TAG, "Unable to delete TWAI node");
+        twai_node = NULL;
+    }
 
     if (rx_msg_queue) {
         vQueueDelete(rx_msg_queue);
@@ -693,14 +761,12 @@ esp_err_t canopen_wait_shutdown(void)
     taskENTER_CRITICAL(&done_mux);
     shutdown_requested = false;
     done_waiter_task = NULL;
-    rx_task_handle = NULL;
     dispatch_task_handle = NULL;
     tx_task_handle = NULL;
     taskEXIT_CRITICAL(&done_mux);
 
     return ESP_OK;
 }
-
 
 typedef struct {
     uint32_t cobid;
