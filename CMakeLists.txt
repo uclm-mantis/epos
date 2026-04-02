@@ -4,5 +4,9 @@ idf_component_register(SRCS "src/moving_average.c"
                             "src/canopen.c" 
                             "src/canopen_console.c" 
                             "src/motor_console.c" 
-                       REQUIRES driver console nvs_flash esp_timer
+                       REQUIRES esp_driver_gpio 
+                                esp_driver_twai 
+                                esp_driver_usb_serial_jtag 
+                                lwip 
+                                console 
                        INCLUDE_DIRS "src")

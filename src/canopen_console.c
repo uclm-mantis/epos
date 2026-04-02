@@ -4,8 +4,6 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
-#include "driver/uart_vfs.h"
-#include "driver/uart.h"
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
 #include "esp_console.h"

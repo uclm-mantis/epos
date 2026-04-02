@@ -1,5 +1,5 @@
-version: "1.0.0"
-description: "Maxon EPOS support for ESP-IDF"
+version: "2.0.0"
+description: "CANopen support for ESP-IDF"
 targets:
   - esp32
   - esp32c3
@@ -8,5 +8,7 @@ targets:
   - esp32s3
   - esp32h2
   - esp32p4
-license: "MIT"
+license: "LGPL-2.1"
 url: "https://github.com/uclm-mantis/epos"
+dependencies:
+  idf: ">=6.0"
