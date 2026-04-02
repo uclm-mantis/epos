@@ -129,13 +129,12 @@ void app_main()
 ## Project structure
 
 - `canopen.h`, `canopen.c`: generic CANopen core.
-- `canopen_client.h`, `canopen_client.c`: generated client-side API from `client_od.h`.
-- `canopen_server.h`, `canopen_server.c`: generated SDO server-side API from `server_od.h`.
+- `canopen_client.h`, `canopen_client.c`: generated client-side API from user-supplied object dictionary.
+- `canopen_server.h`, `canopen_server.c`: generated SDO server-side API from user-supplied object dictionary.
 - `canopen_console.h`, `canopen_console.c`: interactive console.
 - `canopen_types.h`: low-level CANopen frame layouts and constants.
-- `client_od.h`: list of client-side object dictionaries to include.
-- `server_od.h`: list of server-side object dictionaries to include.
 - `epos_types.h`: optional typed views for Maxon EPOS objects.
+- `motor.h`, `motor.c`: abstractions to use CiA 402 capable motor drivers.
 
 ## CANopen core API
 
