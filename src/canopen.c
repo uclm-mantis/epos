@@ -78,6 +78,66 @@ static bool shutdown_requested = false;
 static TaskHandle_t dispatch_task_handle;
 static TaskHandle_t tx_task_handle;
 
+static volatile bool twai_bus_off = false;
+static TickType_t twai_last_bus_off_log = 0;
+static TickType_t twai_last_recover_attempt = 0;
+static TickType_t twai_recover_backoff = pdMS_TO_TICKS(250);
+
+static void canopen_note_bus_off(void)
+{
+    twai_bus_off = true;
+}
+
+static void canopen_clear_bus_off(void)
+{
+    twai_bus_off = false;
+}
+
+static void canopen_log_bus_off_once(void)
+{
+    TickType_t now = xTaskGetTickCount();
+    if ((now - twai_last_bus_off_log) >= pdMS_TO_TICKS(1000)) {
+        twai_last_bus_off_log = now;
+        ESP_LOGE(TAG, "TWAI node is bus-off");
+    }
+}
+
+static void canopen_poll_bus_state(void)
+{
+    if (twai_node == NULL || !twai_bus_off) {
+        return;
+    }
+
+    twai_node_status_t status = {0};
+    if (twai_node_get_info(twai_node, &status, NULL) == ESP_OK) {
+        if (status.state != TWAI_ERROR_BUS_OFF) {
+            canopen_clear_bus_off();
+        }
+    }
+}
+
+static void canopen_request_recovery_if_needed(void)
+{
+    TickType_t now;
+
+    if (twai_node == NULL || !twai_bus_off) {
+        return;
+    }
+
+    now = xTaskGetTickCount();
+    if ((now - twai_last_recover_attempt) < twai_recover_backoff) {
+        return;
+    }
+    twai_last_recover_attempt = now;
+
+    esp_err_t err = twai_node_recover(twai_node);
+    if (err == ESP_OK) {
+        ESP_LOGW(TAG, "TWAI recovery started");
+    } else if (err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "twai_node_recover failed: %s", esp_err_to_name(err));
+    }
+}
+
 static int canopen_timeout_ms(TickType_t ticks)
 {
     if (ticks == portMAX_DELAY) {
@@ -317,17 +377,35 @@ static void canopen_send_now(request_t* self)
         return;
     }
 
+    canopen_poll_bus_state();
+    if (twai_bus_off) {
+        canopen_request_recovery_if_needed();
+        return;
+    }
+
     dump_msg("Transmit", &self->msg);
     canopen_msg_to_frame(&self->msg, &frame);
     err = twai_node_transmit(twai_node, &frame, canopen_timeout_ms(max_delay));
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "twai_node_transmit failed: %s", esp_err_to_name(err));
+        if (err == ESP_ERR_INVALID_STATE) {
+            canopen_note_bus_off();
+            canopen_request_recovery_if_needed();
+            canopen_log_bus_off_once();
+        } else {
+            ESP_LOGE(TAG, "twai_node_transmit failed: %s", esp_err_to_name(err));
+        }
         return;
     }
 
     err = twai_node_transmit_wait_all_done(twai_node, canopen_timeout_ms(max_delay));
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "twai_node_transmit_wait_all_done failed: %s", esp_err_to_name(err));
+        if (err == ESP_ERR_INVALID_STATE) {
+            canopen_note_bus_off();
+            canopen_request_recovery_if_needed();
+            canopen_log_bus_off_once();
+        } else {
+            ESP_LOGE(TAG, "twai_node_transmit_wait_all_done failed: %s", esp_err_to_name(err));
+        }
     }
 }
 
@@ -345,6 +423,12 @@ esp_err_t canopen_post(const twai_message_t *msg)
 
     ESP_RETURN_ON_FALSE(msg != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL msg");
     ESP_RETURN_ON_FALSE(tx_task_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "CANopen not initialized");
+
+    canopen_poll_bus_state();
+    if (twai_bus_off) {
+        canopen_request_recovery_if_needed();
+        return ESP_ERR_INVALID_STATE;
+    }
 
     req = (request_t){
         .run = canopen_send_now,
@@ -364,6 +448,13 @@ esp_err_t canopen_send(const twai_message_t *msg)
 
     ESP_RETURN_ON_FALSE(msg != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL msg");
     ESP_RETURN_ON_FALSE(tx_task_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "CANopen not initialized");
+
+    canopen_poll_bus_state();
+    if (twai_bus_off) {
+        canopen_request_recovery_if_needed();
+        canopen_log_bus_off_once();
+        return ESP_ERR_INVALID_STATE;
+    }
 
     (void) ulTaskNotifyTake(pdTRUE, 0);
 
@@ -588,6 +679,7 @@ static bool canopen_twainode_rx_done_cb(twai_node_handle_t node, const twai_rx_d
     }
 
     canopen_frame_to_msg(&frame, &msg);
+    canopen_clear_bus_off();
     if (xQueueSendFromISR(rx_msg_queue, &msg, &high_task_wakeup) != pdTRUE) {
         return false;
     }
@@ -675,6 +767,10 @@ esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
     shutdown_requested = false;
     done_waiter_task = NULL;
     taskEXIT_CRITICAL(&done_mux);
+
+    twai_bus_off = false;
+    twai_last_bus_off_log = 0;
+    twai_last_recover_attempt = 0;
 
     xTaskCreatePinnedToCore(canopen_dispatch_task, "dispatch", 4096, NULL, 8, &dispatch_task_handle, tskNO_AFFINITY);
     xTaskCreatePinnedToCore(canopen_transmit_task, "transmit", 4096, NULL, 9, &tx_task_handle, tskNO_AFFINITY);
@@ -764,6 +860,10 @@ esp_err_t canopen_wait_shutdown(void)
     dispatch_task_handle = NULL;
     tx_task_handle = NULL;
     taskEXIT_CRITICAL(&done_mux);
+
+    twai_bus_off = false;
+    twai_last_bus_off_log = 0;
+    twai_last_recover_attempt = 0;
 
     return ESP_OK;
 }
