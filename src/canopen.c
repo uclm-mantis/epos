@@ -15,7 +15,7 @@
 typedef struct request_s request_t;
 typedef struct response_s response_t;
 
-typedef void (*run_tx_fn_t) (request_t* self);
+typedef esp_err_t (*run_tx_fn_t) (request_t* self);
 typedef void (*run_rx_fn_t) (response_t* self, twai_message_t* msg);
 
 struct request_s {
@@ -24,6 +24,7 @@ struct request_s {
     uint8_t* value;
     size_t size;
     TaskHandle_t waiter;
+    esp_err_t *result_out;
 };
 
 typedef bool (*match_rx_fn_t)(const response_t *self, const twai_message_t *msg);
@@ -68,6 +69,8 @@ static bool enable_dump_msg = false;
 static QueueHandle_t rx_msg_queue;
 static QueueHandle_t tx_task_queue;
 static twai_node_handle_t twai_node;
+static volatile bool can_bus_off = false;
+static volatile bool can_recovering = false;
 
 #define CANOPEN_INTERNAL_STOP_ID   0xFFFFFFFFu
 
@@ -77,66 +80,6 @@ static bool shutdown_requested = false;
 
 static TaskHandle_t dispatch_task_handle;
 static TaskHandle_t tx_task_handle;
-
-static volatile bool twai_bus_off = false;
-static TickType_t twai_last_bus_off_log = 0;
-static TickType_t twai_last_recover_attempt = 0;
-static TickType_t twai_recover_backoff = pdMS_TO_TICKS(250);
-
-static void canopen_note_bus_off(void)
-{
-    twai_bus_off = true;
-}
-
-static void canopen_clear_bus_off(void)
-{
-    twai_bus_off = false;
-}
-
-static void canopen_log_bus_off_once(void)
-{
-    TickType_t now = xTaskGetTickCount();
-    if ((now - twai_last_bus_off_log) >= pdMS_TO_TICKS(1000)) {
-        twai_last_bus_off_log = now;
-        ESP_LOGE(TAG, "TWAI node is bus-off");
-    }
-}
-
-static void canopen_poll_bus_state(void)
-{
-    if (twai_node == NULL || !twai_bus_off) {
-        return;
-    }
-
-    twai_node_status_t status = {0};
-    if (twai_node_get_info(twai_node, &status, NULL) == ESP_OK) {
-        if (status.state != TWAI_ERROR_BUS_OFF) {
-            canopen_clear_bus_off();
-        }
-    }
-}
-
-static void canopen_request_recovery_if_needed(void)
-{
-    TickType_t now;
-
-    if (twai_node == NULL || !twai_bus_off) {
-        return;
-    }
-
-    now = xTaskGetTickCount();
-    if ((now - twai_last_recover_attempt) < twai_recover_backoff) {
-        return;
-    }
-    twai_last_recover_attempt = now;
-
-    esp_err_t err = twai_node_recover(twai_node);
-    if (err == ESP_OK) {
-        ESP_LOGW(TAG, "TWAI recovery started");
-    } else if (err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "twai_node_recover failed: %s", esp_err_to_name(err));
-    }
-}
 
 static int canopen_timeout_ms(TickType_t ticks)
 {
@@ -148,6 +91,73 @@ static int canopen_timeout_ms(TickType_t ticks)
         ms = 1;
     }
     return (int)ms;
+}
+
+static void canopen_store_result(request_t *self, esp_err_t err)
+{
+    if (self != NULL && self->result_out != NULL) {
+        *self->result_out = err;
+    }
+}
+
+static esp_err_t canopen_try_recover_bus(void)
+{
+    twai_node_status_t status = {0};
+    twai_node_record_t record = {0};
+    esp_err_t err;
+
+    if (twai_node == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    err = twai_node_get_info(twai_node, &status, &record);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "twai_node_get_info failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    if (status.state != TWAI_ERROR_BUS_OFF) {
+        can_bus_off = false;
+        return ESP_OK;
+    }
+
+    if (can_recovering) {
+        for (int i = 0; i < 200; ++i) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            err = twai_node_get_info(twai_node, &status, &record);
+            if (err == ESP_OK && status.state != TWAI_ERROR_BUS_OFF) {
+                can_bus_off = false;
+                can_recovering = false;
+                ESP_LOGW(TAG, "TWAI bus recovered");
+                return ESP_OK;
+            }
+        }
+        return ESP_ERR_TIMEOUT;
+    }
+
+    can_recovering = true;
+    ESP_LOGW(TAG, "TWAI bus-off detected, starting recovery");
+    err = twai_node_recover(twai_node);
+    if (err != ESP_OK) {
+        can_recovering = false;
+        ESP_LOGE(TAG, "twai_node_recover failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    for (int i = 0; i < 200; ++i) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        err = twai_node_get_info(twai_node, &status, &record);
+        if (err == ESP_OK && status.state != TWAI_ERROR_BUS_OFF) {
+            can_bus_off = false;
+            can_recovering = false;
+            ESP_LOGW(TAG, "TWAI bus recovered");
+            return ESP_OK;
+        }
+    }
+
+    can_recovering = false;
+    ESP_LOGE(TAG, "TWAI recovery timeout");
+    return ESP_ERR_TIMEOUT;
 }
 
 static void canopen_msg_to_frame(const twai_message_t *msg, twai_frame_t *frame)
@@ -367,54 +377,60 @@ esp_err_t canopen_unregister_handler(canopen_handler_handle_t handle)
     return err;
 }
 
-static void canopen_send_now(request_t* self)
+static esp_err_t canopen_send_now(request_t* self)
 {
     twai_frame_t frame;
     esp_err_t err;
 
     if (twai_node == NULL) {
         ESP_LOGE(TAG, "TWAI node not initialized");
-        return;
+        canopen_store_result(self, ESP_ERR_INVALID_STATE);
+        return ESP_ERR_INVALID_STATE;
     }
 
-    canopen_poll_bus_state();
-    if (twai_bus_off) {
-        canopen_request_recovery_if_needed();
-        return;
+    if (can_bus_off) {
+        err = canopen_try_recover_bus();
+        if (err != ESP_OK) {
+            canopen_store_result(self, err);
+            return err;
+        }
     }
 
     dump_msg("Transmit", &self->msg);
     canopen_msg_to_frame(&self->msg, &frame);
     err = twai_node_transmit(twai_node, &frame, canopen_timeout_ms(max_delay));
-    if (err != ESP_OK) {
-        if (err == ESP_ERR_INVALID_STATE) {
-            canopen_note_bus_off();
-            canopen_request_recovery_if_needed();
-            canopen_log_bus_off_once();
-        } else {
-            ESP_LOGE(TAG, "twai_node_transmit failed: %s", esp_err_to_name(err));
+    if (err == ESP_ERR_INVALID_STATE || can_bus_off) {
+        esp_err_t rec_err = canopen_try_recover_bus();
+        if (rec_err == ESP_OK) {
+            err = twai_node_transmit(twai_node, &frame, canopen_timeout_ms(max_delay));
+        } else if (err == ESP_OK) {
+            err = rec_err;
         }
-        return;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "twai_node_transmit failed: %s", esp_err_to_name(err));
+        canopen_store_result(self, err);
+        return err;
     }
 
     err = twai_node_transmit_wait_all_done(twai_node, canopen_timeout_ms(max_delay));
     if (err != ESP_OK) {
-        if (err == ESP_ERR_INVALID_STATE) {
-            canopen_note_bus_off();
-            canopen_request_recovery_if_needed();
-            canopen_log_bus_off_once();
-        } else {
-            ESP_LOGE(TAG, "twai_node_transmit_wait_all_done failed: %s", esp_err_to_name(err));
-        }
+        ESP_LOGE(TAG, "twai_node_transmit_wait_all_done failed: %s", esp_err_to_name(err));
+        canopen_store_result(self, err);
+        return err;
     }
+
+    canopen_store_result(self, ESP_OK);
+    return ESP_OK;
 }
 
-static void canopen_send_notify(request_t *self)
+static esp_err_t canopen_send_notify(request_t *self)
 {
-    canopen_send_now(self);
+    esp_err_t err = canopen_send_now(self);
     if (self->waiter != NULL) {
         xTaskNotifyGive(self->waiter);
     }
+    return err;
 }
 
 esp_err_t canopen_post(const twai_message_t *msg)
@@ -424,18 +440,13 @@ esp_err_t canopen_post(const twai_message_t *msg)
     ESP_RETURN_ON_FALSE(msg != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL msg");
     ESP_RETURN_ON_FALSE(tx_task_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "CANopen not initialized");
 
-    canopen_poll_bus_state();
-    if (twai_bus_off) {
-        canopen_request_recovery_if_needed();
-        return ESP_ERR_INVALID_STATE;
-    }
-
     req = (request_t){
         .run = canopen_send_now,
         .msg = *msg,
         .value = NULL,
         .size = 0,
         .waiter = NULL,
+        .result_out = NULL,
     };
 
     return xQueueSend(tx_task_queue, &req, portMAX_DELAY) == pdTRUE ? ESP_OK : ESP_FAIL;
@@ -445,16 +456,10 @@ esp_err_t canopen_send(const twai_message_t *msg)
 {
     TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
     request_t req;
+    esp_err_t result = ESP_OK;
 
     ESP_RETURN_ON_FALSE(msg != NULL, ESP_ERR_INVALID_ARG, TAG, "NULL msg");
     ESP_RETURN_ON_FALSE(tx_task_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "CANopen not initialized");
-
-    canopen_poll_bus_state();
-    if (twai_bus_off) {
-        canopen_request_recovery_if_needed();
-        canopen_log_bus_off_once();
-        return ESP_ERR_INVALID_STATE;
-    }
 
     (void) ulTaskNotifyTake(pdTRUE, 0);
 
@@ -464,6 +469,7 @@ esp_err_t canopen_send(const twai_message_t *msg)
         .value = NULL,
         .size = 0,
         .waiter = waiter,
+        .result_out = &result,
     };
 
     if (xQueueSend(tx_task_queue, &req, portMAX_DELAY) != pdTRUE) {
@@ -475,7 +481,7 @@ esp_err_t canopen_send(const twai_message_t *msg)
         return ESP_FAIL;
     }
 
-    return ESP_OK;
+    return result;
 }
 
 static void sdo_download_response(response_t* self, twai_message_t* msg)
@@ -490,16 +496,20 @@ static void sdo_download_response(response_t* self, twai_message_t* msg)
 
 static void sdo_download_segment_response(response_t* self, twai_message_t* msg);
 
-static void sdo_download_segment_request(request_t* self)
+static esp_err_t sdo_download_segment_request(request_t* self)
 {
     response_t resp = { .run = sdo_download_segment_response, .cobid = self->msg.identifier - 0x600 + 0x580, .value = self->value, .size = self->size, .waiter = self->waiter };
     resp.match = match_cobid_only;
     esp_err_t err = canopen_add_pending_response(&resp);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "No free pending response slots");
-        return;
+        canopen_store_result(self, err);
+        if (self->waiter != NULL) {
+            xTaskNotifyGive(self->waiter);
+        }
+        return err;
     }
-    canopen_send_now(self);
+    return canopen_send_now(self);
 }
 
 static void sdo_download_segment_response(response_t* self, twai_message_t* msg)
@@ -514,14 +524,14 @@ static void sdo_download_segment_response(response_t* self, twai_message_t* msg)
                                                  .t = (resp->scs != SDO_SCS_DOWNLOAD && !resp->t),
                                                  .c = (n == self->size) };
         memcpy(req_payload->seg_data, self->value, n);
-        request_t req = { .run = sdo_download_segment_request, .msg = req_msg, .value = self->value + n, .size = self->size - n, .waiter = self->waiter };
+        request_t req = { .run = sdo_download_segment_request, .msg = req_msg, .value = self->value + n, .size = self->size - n, .waiter = self->waiter, .result_out = self->result_out };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     } else {
         xTaskNotifyGive(self->waiter);
     }
 }
 
-static void sdo_download_request(request_t* self)
+static esp_err_t sdo_download_request(request_t* self)
 {
     SDO_download_req_t* payload = (SDO_download_req_t*) self->msg.data;
     if (payload->e) {
@@ -530,7 +540,11 @@ static void sdo_download_request(request_t* self)
         esp_err_t err = canopen_add_pending_response(&resp);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "No free pending response slots");
-            return;
+            canopen_store_result(self, err);
+            if (self->waiter != NULL) {
+                xTaskNotifyGive(self->waiter);
+            }
+            return err;
         }
     } else {
         response_t resp = { .run =  sdo_download_segment_response, .cobid = self->msg.identifier - 0x600 + 0x580, .value = self->value, .size = self->size, .waiter = self->waiter };
@@ -538,14 +552,19 @@ static void sdo_download_request(request_t* self)
         esp_err_t err = canopen_add_pending_response(&resp);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "No free pending response slots");
-            return;
+            canopen_store_result(self, err);
+            if (self->waiter != NULL) {
+                xTaskNotifyGive(self->waiter);
+            }
+            return err;
         }
     }
-    canopen_send_now(self);
+    return canopen_send_now(self);
 }
 
 esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void* value, size_t size)
 {
+    esp_err_t result = ESP_OK;
     twai_message_t msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = id, .data_length_code = 8 };
     SDO_download_req_t* payload = (SDO_download_req_t*) msg.data;
     if (size <= 4) {
@@ -556,16 +575,16 @@ esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void* valu
     }
     TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
     (void) ulTaskNotifyTake(pdTRUE, 0);
-    request_t req = { .run = sdo_download_request, .msg = msg, .value = value, .size = size, .waiter = waiter };
+    request_t req = { .run = sdo_download_request, .msg = msg, .value = value, .size = size, .waiter = waiter, .result_out = &result };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     if (ulTaskNotifyTake(pdTRUE, max_delay) != pdTRUE) {
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
         return ESP_FAIL;
     }
-    return ESP_OK;
+    return result;
 }
 
-static void sdo_upload_segment_request(request_t* self);
+static esp_err_t sdo_upload_segment_request(request_t* self);
 
 static void sdo_upload_segment_response(response_t* self, twai_message_t* msg)
 {
@@ -579,21 +598,25 @@ static void sdo_upload_segment_response(response_t* self, twai_message_t* msg)
         twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
         SDO_upload_seq_req_t* req_payload = (SDO_upload_seq_req_t*) req_msg.data;
         *req_payload = (SDO_upload_seq_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD_SEG, .t = !payload->t, .reserved = {0} };
-        request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .waiter = self->waiter };
+        request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .waiter = self->waiter, .result_out = self->result_out };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     }
 }
 
-static void sdo_upload_segment_request(request_t* self)
+static esp_err_t sdo_upload_segment_request(request_t* self)
 {
     response_t resp = { .run = sdo_upload_segment_response, .cobid = self->msg.identifier - 0x600 + 0x580, .value = self->value, .waiter = self->waiter };
     resp.match = match_cobid_only;
     esp_err_t err = canopen_add_pending_response(&resp);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "No free pending response slots");
-        return;
+        canopen_store_result(self, err);
+        if (self->waiter != NULL) {
+            xTaskNotifyGive(self->waiter);
+        }
+        return err;
     }
-    canopen_send_now(self);
+    return canopen_send_now(self);
 }
 
 static void sdo_upload_response(response_t* self, twai_message_t* msg)
@@ -609,32 +632,37 @@ static void sdo_upload_response(response_t* self, twai_message_t* msg)
         twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
         SDO_upload_seq_req_t* payload = (SDO_upload_seq_req_t*) req_msg.data;
         *payload = (SDO_upload_seq_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD_SEG, .t = 0, .reserved = {0} };
-        request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .waiter = self->waiter };
+        request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .waiter = self->waiter, .result_out = self->result_out };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     }
 }
 
-static void sdo_upload_request(request_t* self)
+static esp_err_t sdo_upload_request(request_t* self)
 {
     response_t resp = { .run = sdo_upload_response, .cobid = self->msg.identifier - 0x600 + 0x580, .value = self->value, .waiter = self->waiter };
     resp.match = match_cobid_only;
     esp_err_t err = canopen_add_pending_response(&resp);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "No free pending response slots");
-        return;
+        canopen_store_result(self, err);
+        if (self->waiter != NULL) {
+            xTaskNotifyGive(self->waiter);
+        }
+        return err;
     }
-    canopen_send_now(self);
+    return canopen_send_now(self);
 }
 
 esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void* ret)
 {
+    esp_err_t result = ESP_OK;
     twai_message_t msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = id, .data_length_code = 8 };
     SDO_upload_req_t* payload = (SDO_upload_req_t*) msg.data;
     *payload = (SDO_upload_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD, .index = index, .subindex = subindex, .reserved = {0} };
 
     TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
     (void) ulTaskNotifyTake(pdTRUE, 0);
-    request_t req = { .run = sdo_upload_request, .msg = msg, .value = ret, .waiter = waiter };
+    request_t req = { .run = sdo_upload_request, .msg = msg, .value = ret, .waiter = waiter, .result_out = &result };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     if (ulTaskNotifyTake(pdTRUE, max_delay) != pdTRUE) {
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
@@ -661,6 +689,35 @@ void canopen_request_shutdown(void)
     }
 }
 
+static bool canopen_twainode_error_cb(twai_node_handle_t node,
+                                      const twai_error_event_data_t *edata,
+                                      void *user_ctx)
+{
+    (void) node;
+    (void) edata;
+    (void) user_ctx;
+    ESP_LOGW(TAG, "TWAI error event");
+    return false;
+}
+
+static bool canopen_twainode_state_change_cb(twai_node_handle_t node,
+                                             const twai_state_change_event_data_t *edata,
+                                             void *user_ctx)
+{
+    (void) node;
+    (void) user_ctx;
+    ESP_LOGW(TAG, "TWAI state change: %d -> %d", (int)edata->old_state, (int)edata->new_state);
+
+    if (edata->new_state == TWAI_ERROR_BUS_OFF) {
+        can_bus_off = true;
+    }
+    if (edata->old_state == TWAI_ERROR_BUS_OFF && edata->new_state != TWAI_ERROR_BUS_OFF) {
+        can_bus_off = false;
+        can_recovering = false;
+    }
+    return false;
+}
+
 static bool canopen_twainode_rx_done_cb(twai_node_handle_t node, const twai_rx_done_event_data_t *edata, void *user_ctx)
 {
     (void) edata;
@@ -679,7 +736,6 @@ static bool canopen_twainode_rx_done_cb(twai_node_handle_t node, const twai_rx_d
     }
 
     canopen_frame_to_msg(&frame, &msg);
-    canopen_clear_bus_off();
     if (xQueueSendFromISR(rx_msg_queue, &msg, &high_task_wakeup) != pdTRUE) {
         return false;
     }
@@ -695,7 +751,7 @@ static void canopen_transmit_task(void *arg)
             continue;
         }
         if (req.run == NULL) break;
-        req.run(&req);
+        (void) req.run(&req);
     }
     vTaskDelete(NULL);
 }
@@ -726,6 +782,8 @@ esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
     twai_mask_filter_config_t filter_cfg = {0};
     twai_event_callbacks_t callbacks = {
         .on_rx_done = canopen_twainode_rx_done_cb,
+        .on_error = canopen_twainode_error_cb,
+        .on_state_change = canopen_twainode_state_change_cb,
     };
 
     if (cfg == NULL)
@@ -768,9 +826,8 @@ esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
     done_waiter_task = NULL;
     taskEXIT_CRITICAL(&done_mux);
 
-    twai_bus_off = false;
-    twai_last_bus_off_log = 0;
-    twai_last_recover_attempt = 0;
+    can_bus_off = false;
+    can_recovering = false;
 
     xTaskCreatePinnedToCore(canopen_dispatch_task, "dispatch", 4096, NULL, 8, &dispatch_task_handle, tskNO_AFFINITY);
     xTaskCreatePinnedToCore(canopen_transmit_task, "transmit", 4096, NULL, 9, &tx_task_handle, tskNO_AFFINITY);
@@ -861,9 +918,8 @@ esp_err_t canopen_wait_shutdown(void)
     tx_task_handle = NULL;
     taskEXIT_CRITICAL(&done_mux);
 
-    twai_bus_off = false;
-    twai_last_bus_off_log = 0;
-    twai_last_recover_attempt = 0;
+    can_bus_off = false;
+    can_recovering = false;
 
     return ESP_OK;
 }
@@ -1151,7 +1207,7 @@ static esp_err_t canopen_pdo_payload_put(canopen_pdo_payload_t *p, const void *s
 
     memcpy(&p->data[p->len], src, n);
     p->len += n;
-    return ESP_OK;
+    return result;
 }
 
 esp_err_t canopen_pdo_payload_put_u8(canopen_pdo_payload_t *p, uint8_t v)
