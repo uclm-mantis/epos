@@ -16,6 +16,7 @@ extern "C" {
 
 #define DEFAULT_CAN_TX 21
 #define DEFAULT_CAN_RX 20
+#define DEFAULT_CAN_BITRATE 1000000u
 
 static inline twai_message_t twai_message_init_std(uint32_t identifier, const void *data, size_t len)
 {
@@ -40,6 +41,7 @@ typedef void (*canopen_handler_fn)(uint32_t cobid, void *data, void *context);
 typedef struct {
     int can_tx_pin;
     int can_rx_pin;
+    uint32_t can_bitrate;
     unsigned max_delay_ms;
     bool enable_dump_msg;
 } canopen_init_cfg_t;
@@ -47,6 +49,7 @@ typedef struct {
 #define CANOPEN_INIT_DEFAULT() (canopen_init_cfg_t){ \
     .can_tx_pin = DEFAULT_CAN_TX, \
     .can_rx_pin = DEFAULT_CAN_RX, \
+    .can_bitrate = DEFAULT_CAN_BITRATE, \
     .max_delay_ms = 3000, \
     .enable_dump_msg = false, \
 }
@@ -130,6 +133,12 @@ esp_err_t canopen_pdo_configure(uint8_t node,
                                 const canopen_pdo_cfg_t *cfg);
 
 esp_err_t canopen_pdo_send(uint8_t node,
+                           uint8_t rpdo_num,
+                           uint32_t cob_id_override,
+                           const void *data,
+                           size_t len);
+
+esp_err_t canopen_pdo_post(uint8_t node,
                            uint8_t rpdo_num,
                            uint32_t cob_id_override,
                            const void *data,

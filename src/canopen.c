@@ -1,4 +1,5 @@
 #include "canopen.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,9 @@
 #include "driver/gpio.h"
 
 #define N_ELEMS(x) (sizeof(x)/sizeof((x)[0]))
+#define CANOPEN_RX_MSG_QUEUE_LEN 64
+#define CANOPEN_TX_TASK_QUEUE_LEN 16
+#define CANOPEN_TWAI_TX_QUEUE_DEPTH 32
 
 typedef struct request_s request_t;
 typedef struct response_s response_t;
@@ -37,6 +41,7 @@ struct response_s {
     size_t size;
     TaskHandle_t waiter;
     uint16_t token;
+    esp_err_t *result_out;
 };
 
 typedef struct {
@@ -71,6 +76,17 @@ static QueueHandle_t tx_task_queue;
 static twai_node_handle_t twai_node;
 static volatile bool can_bus_off = false;
 static volatile bool can_recovering = false;
+static volatile bool can_driver_error_event = false;
+static volatile bool can_driver_state_change_event = false;
+static volatile uint8_t can_driver_old_state = 0;
+static volatile uint8_t can_driver_new_state = 0;
+static volatile uint32_t can_driver_error_flags = 0;
+static volatile uint32_t can_driver_error_count = 0;
+static volatile uint32_t can_driver_state_change_count = 0;
+static volatile uint32_t can_driver_rx_queue_drop_count = 0;
+static volatile uint32_t can_driver_rx_read_fail_count = 0;
+static volatile uint32_t can_driver_async_tx_drop_count = 0;
+static portMUX_TYPE can_driver_event_mux = portMUX_INITIALIZER_UNLOCKED;
 
 #define CANOPEN_INTERNAL_STOP_ID   0xFFFFFFFFu
 
@@ -97,6 +113,206 @@ static void canopen_store_result(request_t *self, esp_err_t err)
 {
     if (self != NULL && self->result_out != NULL) {
         *self->result_out = err;
+    }
+}
+
+static const char *canopen_twai_state_str(twai_error_state_t state)
+{
+    switch (state) {
+    case TWAI_ERROR_ACTIVE:
+        return "active";
+    case TWAI_ERROR_WARNING:
+        return "warning";
+    case TWAI_ERROR_PASSIVE:
+        return "passive";
+    case TWAI_ERROR_BUS_OFF:
+        return "bus_off";
+    default:
+        return "unknown";
+    }
+}
+
+static void canopen_append_flag(char *buf, size_t len, bool *first, const char *text)
+{
+    size_t used;
+
+    if (buf == NULL || len == 0 || text == NULL) {
+        return;
+    }
+
+    used = strnlen(buf, len);
+    if (used >= len - 1u) {
+        return;
+    }
+
+    (void)snprintf(buf + used,
+                   len - used,
+                   "%s%s",
+                   *first ? "" : "|",
+                   text);
+    *first = false;
+}
+
+static void canopen_format_error_flags(uint32_t flags, char *buf, size_t len)
+{
+    bool first = true;
+
+    if (buf == NULL || len == 0) {
+        return;
+    }
+
+    buf[0] = '\0';
+    if (flags == 0u) {
+        (void)snprintf(buf, len, "unspecified");
+        return;
+    }
+
+    if ((flags & (1u << 0)) != 0u) {
+        canopen_append_flag(buf, len, &first, "arb_lost");
+    }
+    if ((flags & (1u << 1)) != 0u) {
+        canopen_append_flag(buf, len, &first, "bit");
+    }
+    if ((flags & (1u << 2)) != 0u) {
+        canopen_append_flag(buf, len, &first, "form");
+    }
+    if ((flags & (1u << 3)) != 0u) {
+        canopen_append_flag(buf, len, &first, "stuff");
+    }
+    if ((flags & (1u << 4)) != 0u) {
+        canopen_append_flag(buf, len, &first, "ack");
+    }
+
+    if (first) {
+        (void)snprintf(buf, len, "0x%08" PRIx32, flags);
+    }
+}
+
+static void canopen_maybe_log_driver_events(void)
+{
+    bool log_error = false;
+    bool log_state = false;
+    uint8_t old_sta = 0;
+    uint8_t new_sta = 0;
+    uint32_t error_flags = 0;
+    uint32_t error_count = 0;
+    uint32_t state_change_count = 0;
+    uint32_t rx_queue_drop_count = 0;
+    uint32_t rx_read_fail_count = 0;
+    uint32_t async_tx_drop_count = 0;
+    twai_node_status_t status = {0};
+    twai_node_record_t record = {0};
+    bool have_info = false;
+
+    taskENTER_CRITICAL(&can_driver_event_mux);
+    if (can_driver_error_event) {
+        log_error = true;
+        can_driver_error_event = false;
+        error_flags = can_driver_error_flags;
+        can_driver_error_flags = 0;
+        error_count = can_driver_error_count;
+        can_driver_error_count = 0;
+    }
+    if (can_driver_state_change_event) {
+        log_state = true;
+        old_sta = can_driver_old_state;
+        new_sta = can_driver_new_state;
+        state_change_count = can_driver_state_change_count;
+        can_driver_state_change_count = 0;
+        can_driver_state_change_event = false;
+    }
+    rx_queue_drop_count = can_driver_rx_queue_drop_count;
+    can_driver_rx_queue_drop_count = 0;
+    rx_read_fail_count = can_driver_rx_read_fail_count;
+    can_driver_rx_read_fail_count = 0;
+    async_tx_drop_count = can_driver_async_tx_drop_count;
+    can_driver_async_tx_drop_count = 0;
+    taskEXIT_CRITICAL(&can_driver_event_mux);
+
+    if ((log_error || log_state) &&
+        twai_node != NULL &&
+        twai_node_get_info(twai_node, &status, &record) == ESP_OK) {
+        have_info = true;
+    }
+
+    if (log_error) {
+        char flags_buf[48];
+        canopen_format_error_flags(error_flags, flags_buf, sizeof(flags_buf));
+        if (have_info) {
+            ESP_LOGW(TAG,
+                     "TWAI error event: flags=%s tx_err=%u rx_err=%u bus_err=%" PRIu32 " state=%s%s",
+                     flags_buf,
+                     (unsigned) status.tx_error_count,
+                     (unsigned) status.rx_error_count,
+                     record.bus_err_num,
+                     canopen_twai_state_str(status.state),
+                     error_count > 1u ? " (coalesced)" : "");
+        } else {
+            ESP_LOGW(TAG,
+                     "TWAI error event: flags=%s%s",
+                     flags_buf,
+                     error_count > 1u ? " (coalesced)" : "");
+        }
+    }
+
+    if (log_state) {
+        if (have_info) {
+            ESP_LOGW(TAG,
+                     "TWAI state change: %s -> %s tx_err=%u rx_err=%u bus_err=%" PRIu32 "%s",
+                     canopen_twai_state_str((twai_error_state_t) old_sta),
+                     canopen_twai_state_str((twai_error_state_t) new_sta),
+                     (unsigned) status.tx_error_count,
+                     (unsigned) status.rx_error_count,
+                     record.bus_err_num,
+                     state_change_count > 1u ? " (coalesced)" : "");
+        } else {
+            ESP_LOGW(TAG,
+                     "TWAI state change: %s -> %s%s",
+                     canopen_twai_state_str((twai_error_state_t) old_sta),
+                     canopen_twai_state_str((twai_error_state_t) new_sta),
+                     state_change_count > 1u ? " (coalesced)" : "");
+        }
+    }
+
+    if (rx_read_fail_count > 0u) {
+        ESP_LOGW(TAG,
+                 "TWAI RX read failures: dropped=%" PRIu32,
+                 rx_read_fail_count);
+    }
+
+    if (rx_queue_drop_count > 0u) {
+        if (have_info) {
+            ESP_LOGW(TAG,
+                     "TWAI RX queue overflow: dropped=%" PRIu32 " queue_len=%u tx_err=%u rx_err=%u bus_err=%" PRIu32 " state=%s",
+                     rx_queue_drop_count,
+                     (unsigned) CANOPEN_RX_MSG_QUEUE_LEN,
+                     (unsigned) status.tx_error_count,
+                     (unsigned) status.rx_error_count,
+                     record.bus_err_num,
+                     canopen_twai_state_str(status.state));
+        } else {
+            ESP_LOGW(TAG,
+                     "TWAI RX queue overflow: dropped=%" PRIu32 " queue_len=%u",
+                     rx_queue_drop_count,
+                     (unsigned) CANOPEN_RX_MSG_QUEUE_LEN);
+        }
+    }
+
+    if (async_tx_drop_count > 0u) {
+        if (have_info) {
+            ESP_LOGW(TAG,
+                     "TWAI async TX saturated: dropped=%" PRIu32 " tx_queue_remaining=%" PRIu32 " tx_err=%u rx_err=%u bus_err=%" PRIu32 " state=%s",
+                     async_tx_drop_count,
+                     status.tx_queue_remaining,
+                     (unsigned) status.tx_error_count,
+                     (unsigned) status.rx_error_count,
+                     record.bus_err_num,
+                     canopen_twai_state_str(status.state));
+        } else {
+            ESP_LOGW(TAG,
+                     "TWAI async TX saturated: dropped=%" PRIu32,
+                     async_tx_drop_count);
+        }
     }
 }
 
@@ -270,6 +486,11 @@ static void canopen_receive_canopen(twai_message_t* msg)
     xSemaphoreGive(canopen_handlers_mutex);
 
     for (int i = 0; i < count; ++i) {
+        if (matches[i].handler == NULL) {
+            ESP_LOGE(TAG, "NULL CANopen handler for COB-ID %08x",
+                    (unsigned)matches[i].cobid);
+            continue;
+        }
         matches[i].handler(matches[i].cobid, msg->data, matches[i].context);
     }
 }
@@ -424,6 +645,61 @@ static esp_err_t canopen_send_now(request_t* self)
     return ESP_OK;
 }
 
+static esp_err_t canopen_post_now(request_t *self)
+{
+    twai_frame_t frame;
+    esp_err_t err;
+    twai_node_status_t status = {0};
+    twai_node_record_t record = {0};
+
+    if (twai_node == NULL) {
+        ESP_LOGE(TAG, "TWAI node not initialized");
+        canopen_store_result(self, ESP_ERR_INVALID_STATE);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (can_bus_off) {
+        err = canopen_try_recover_bus();
+        if (err != ESP_OK) {
+            canopen_store_result(self, err);
+            return err;
+        }
+    }
+
+    err = twai_node_get_info(twai_node, &status, &record);
+    if (err == ESP_OK && status.tx_queue_remaining == 0u) {
+        taskENTER_CRITICAL(&can_driver_event_mux);
+        can_driver_async_tx_drop_count++;
+        taskEXIT_CRITICAL(&can_driver_event_mux);
+        canopen_store_result(self, ESP_ERR_TIMEOUT);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    dump_msg("Post", &self->msg);
+    canopen_msg_to_frame(&self->msg, &frame);
+    err = twai_node_transmit(twai_node, &frame, 0);
+    if (err == ESP_ERR_INVALID_STATE || can_bus_off) {
+        esp_err_t rec_err = canopen_try_recover_bus();
+        if (rec_err == ESP_OK) {
+            err = twai_node_transmit(twai_node, &frame, 0);
+        } else if (err == ESP_OK) {
+            err = rec_err;
+        }
+    }
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_TIMEOUT) {
+            taskENTER_CRITICAL(&can_driver_event_mux);
+            can_driver_async_tx_drop_count++;
+            taskEXIT_CRITICAL(&can_driver_event_mux);
+        }
+        canopen_store_result(self, err);
+        return err;
+    }
+
+    canopen_store_result(self, ESP_OK);
+    return ESP_OK;
+}
+
 static esp_err_t canopen_send_notify(request_t *self)
 {
     esp_err_t err = canopen_send_now(self);
@@ -441,7 +717,7 @@ esp_err_t canopen_post(const twai_message_t *msg)
     ESP_RETURN_ON_FALSE(tx_task_queue != NULL, ESP_ERR_INVALID_STATE, TAG, "CANopen not initialized");
 
     req = (request_t){
-        .run = canopen_send_now,
+        .run = canopen_post_now,
         .msg = *msg,
         .value = NULL,
         .size = 0,
@@ -449,7 +725,12 @@ esp_err_t canopen_post(const twai_message_t *msg)
         .result_out = NULL,
     };
 
-    return xQueueSend(tx_task_queue, &req, portMAX_DELAY) == pdTRUE ? ESP_OK : ESP_FAIL;
+    if (xQueueSend(tx_task_queue, &req, 0) == pdTRUE) {
+        return ESP_OK;
+    }
+
+    ESP_LOGW(TAG, "CANopen TX queue full, dropping async frame id=0x%03" PRIx32, msg->identifier);
+    return ESP_ERR_TIMEOUT;
 }
 
 esp_err_t canopen_send(const twai_message_t *msg)
@@ -498,7 +779,14 @@ static void sdo_download_segment_response(response_t* self, twai_message_t* msg)
 
 static esp_err_t sdo_download_segment_request(request_t* self)
 {
-    response_t resp = { .run = sdo_download_segment_response, .cobid = self->msg.identifier - 0x600 + 0x580, .value = self->value, .size = self->size, .waiter = self->waiter };
+    response_t resp = { 
+        .run = sdo_download_segment_response, 
+        .cobid = self->msg.identifier - 0x600 + 0x580, 
+        .value = self->value, 
+        .size = self->size, 
+        .waiter = self->waiter,
+        .result_out = self->result_out
+    };
     resp.match = match_cobid_only;
     esp_err_t err = canopen_add_pending_response(&resp);
     if (err != ESP_OK) {
@@ -535,7 +823,12 @@ static esp_err_t sdo_download_request(request_t* self)
 {
     SDO_download_req_t* payload = (SDO_download_req_t*) self->msg.data;
     if (payload->e) {
-        response_t resp = { .run =  sdo_download_response, .cobid = self->msg.identifier - 0x600 + 0x580, .waiter = self->waiter };
+        response_t resp = { 
+            .run =  sdo_download_response, 
+            .cobid = self->msg.identifier - 0x600 + 0x580, 
+            .waiter = self->waiter,
+            .result_out = self->result_out
+        };
         resp.match = match_cobid_only;
         esp_err_t err = canopen_add_pending_response(&resp);
         if (err != ESP_OK) {
@@ -547,7 +840,14 @@ static esp_err_t sdo_download_request(request_t* self)
             return err;
         }
     } else {
-        response_t resp = { .run =  sdo_download_segment_response, .cobid = self->msg.identifier - 0x600 + 0x580, .value = self->value, .size = self->size, .waiter = self->waiter };
+        response_t resp = { 
+            .run =  sdo_download_segment_response, 
+            .cobid = self->msg.identifier - 0x600 + 0x580, 
+            .value = self->value, 
+            .size = self->size, 
+            .waiter = self->waiter,
+            .result_out = self->result_out
+        };
         resp.match = match_cobid_only;
         esp_err_t err = canopen_add_pending_response(&resp);
         if (err != ESP_OK) {
@@ -605,7 +905,13 @@ static void sdo_upload_segment_response(response_t* self, twai_message_t* msg)
 
 static esp_err_t sdo_upload_segment_request(request_t* self)
 {
-    response_t resp = { .run = sdo_upload_segment_response, .cobid = self->msg.identifier - 0x600 + 0x580, .value = self->value, .waiter = self->waiter };
+    response_t resp = { 
+        .run = sdo_upload_segment_response, 
+        .cobid = self->msg.identifier - 0x600 + 0x580, 
+        .value = self->value, 
+        .waiter = self->waiter,
+        .result_out = self->result_out
+    };
     resp.match = match_cobid_only;
     esp_err_t err = canopen_add_pending_response(&resp);
     if (err != ESP_OK) {
@@ -637,10 +943,17 @@ static void sdo_upload_response(response_t* self, twai_message_t* msg)
     }
 }
 
-static esp_err_t sdo_upload_request(request_t* self)
+static esp_err_t sdo_upload_request(request_t *self)
 {
-    response_t resp = { .run = sdo_upload_response, .cobid = self->msg.identifier - 0x600 + 0x580, .value = self->value, .waiter = self->waiter };
-    resp.match = match_cobid_only;
+    response_t resp = {
+        .run = sdo_upload_response,
+        .match = match_cobid_only,
+        .cobid = self->msg.identifier - 0x600 + 0x580,
+        .value = self->value,
+        .waiter = self->waiter,
+        .result_out = self->result_out
+    };
+
     esp_err_t err = canopen_add_pending_response(&resp);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "No free pending response slots");
@@ -650,25 +963,55 @@ static esp_err_t sdo_upload_request(request_t* self)
         }
         return err;
     }
+
     return canopen_send_now(self);
 }
 
-esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void* ret)
+esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void *ret)
 {
     esp_err_t result = ESP_OK;
-    twai_message_t msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = id, .data_length_code = 8 };
-    SDO_upload_req_t* payload = (SDO_upload_req_t*) msg.data;
-    *payload = (SDO_upload_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD, .index = index, .subindex = subindex, .reserved = {0} };
+
+    twai_message_t msg = {
+        .extd = 0,
+        .rtr = 0,
+        .ss = 0,
+        .self = 0,
+        .dlc_non_comp = 0,
+        .identifier = id,
+        .data_length_code = 8
+    };
+
+    SDO_upload_req_t *payload = (SDO_upload_req_t *) msg.data;
+    *payload = (SDO_upload_req_t) {
+        .x = 0,
+        .ccs = SDO_CCS_UPLOAD,
+        .index = index,
+        .subindex = subindex,
+        .reserved = {0}
+    };
 
     TaskHandle_t waiter = xTaskGetCurrentTaskHandle();
     (void) ulTaskNotifyTake(pdTRUE, 0);
-    request_t req = { .run = sdo_upload_request, .msg = msg, .value = ret, .waiter = waiter, .result_out = &result };
-    xQueueSend(tx_task_queue, &req, portMAX_DELAY);
+
+    request_t req = {
+        .run = sdo_upload_request,
+        .msg = msg,
+        .value = ret,
+        .size = 0,
+        .waiter = waiter,
+        .result_out = &result
+    };
+
+    if (xQueueSend(tx_task_queue, &req, portMAX_DELAY) != pdTRUE) {
+        return ESP_FAIL;
+    }
+
     if (ulTaskNotifyTake(pdTRUE, max_delay) != pdTRUE) {
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
         return ESP_FAIL;
-   }
-   return ESP_OK;
+    }
+
+    return result;
 }
 
 esp_err_t nmt(uint8_t cs, uint8_t n)
@@ -694,9 +1037,13 @@ static bool canopen_twainode_error_cb(twai_node_handle_t node,
                                       void *user_ctx)
 {
     (void) node;
-    (void) edata;
     (void) user_ctx;
-    ESP_LOGW(TAG, "TWAI error event");
+
+    taskENTER_CRITICAL_ISR(&can_driver_event_mux);
+    can_driver_error_event = true;
+    can_driver_error_flags |= edata->err_flags.val;
+    can_driver_error_count++;
+    taskEXIT_CRITICAL_ISR(&can_driver_event_mux);
     return false;
 }
 
@@ -706,12 +1053,18 @@ static bool canopen_twainode_state_change_cb(twai_node_handle_t node,
 {
     (void) node;
     (void) user_ctx;
-    ESP_LOGW(TAG, "TWAI state change: %d -> %d", (int)edata->old_state, (int)edata->new_state);
 
-    if (edata->new_state == TWAI_ERROR_BUS_OFF) {
+    taskENTER_CRITICAL_ISR(&can_driver_event_mux);
+    can_driver_old_state = (uint8_t) edata->old_sta;
+    can_driver_new_state = (uint8_t) edata->new_sta;
+    can_driver_state_change_event = true;
+    can_driver_state_change_count++;
+    taskEXIT_CRITICAL_ISR(&can_driver_event_mux);
+
+    if (edata->new_sta == TWAI_ERROR_BUS_OFF) {
         can_bus_off = true;
     }
-    if (edata->old_state == TWAI_ERROR_BUS_OFF && edata->new_state != TWAI_ERROR_BUS_OFF) {
+    if (edata->old_sta == TWAI_ERROR_BUS_OFF && edata->new_sta != TWAI_ERROR_BUS_OFF) {
         can_bus_off = false;
         can_recovering = false;
     }
@@ -732,11 +1085,17 @@ static bool canopen_twainode_rx_done_cb(twai_node_handle_t node, const twai_rx_d
     BaseType_t high_task_wakeup = pdFALSE;
 
     if (twai_node_receive_from_isr(node, &frame) != ESP_OK) {
+        taskENTER_CRITICAL_ISR(&can_driver_event_mux);
+        can_driver_rx_read_fail_count++;
+        taskEXIT_CRITICAL_ISR(&can_driver_event_mux);
         return false;
     }
 
     canopen_frame_to_msg(&frame, &msg);
     if (xQueueSendFromISR(rx_msg_queue, &msg, &high_task_wakeup) != pdTRUE) {
+        taskENTER_CRITICAL_ISR(&can_driver_event_mux);
+        can_driver_rx_queue_drop_count++;
+        taskEXIT_CRITICAL_ISR(&can_driver_event_mux);
         return false;
     }
 
@@ -746,11 +1105,15 @@ static bool canopen_twainode_rx_done_cb(twai_node_handle_t node, const twai_rx_d
 static void canopen_transmit_task(void *arg)
 {
     for (;;) {
+        canopen_maybe_log_driver_events();
         request_t req;
         if (xQueueReceive(tx_task_queue, &req, portMAX_DELAY) != pdTRUE) {
             continue;
         }
-        if (req.run == NULL) break;
+        if (req.run == NULL) {
+            ESP_LOGW(TAG, "Stopping CANopen transmit task");
+            break;
+        }
         (void) req.run(&req);
     }
     vTaskDelete(NULL);
@@ -762,11 +1125,17 @@ static void canopen_dispatch_task(void *arg)
     response_t resp;
 
     for (;;) {
+        canopen_maybe_log_driver_events();
         if (xQueueReceive(rx_msg_queue, &msg, portMAX_DELAY) != pdTRUE) {
             continue;
         }
         if (msg.identifier == CANOPEN_INTERNAL_STOP_ID) break;
         if (canopen_take_pending_response(&msg, &resp)) {
+            if (resp.run == NULL) {
+                ESP_LOGE(TAG, "NULL pending response callback for COB-ID %08x",
+                        (unsigned)resp.cobid);
+                continue;
+            }
             resp.run(&resp, &msg);
             continue;
         }
@@ -792,8 +1161,8 @@ esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
     max_delay = pdMS_TO_TICKS(cfg->max_delay_ms);
     enable_dump_msg = cfg->enable_dump_msg;
 
-    rx_msg_queue = xQueueCreate(16, sizeof(twai_message_t));
-    tx_task_queue = xQueueCreate(8, sizeof(request_t));
+    rx_msg_queue = xQueueCreate(CANOPEN_RX_MSG_QUEUE_LEN, sizeof(twai_message_t));
+    tx_task_queue = xQueueCreate(CANOPEN_TX_TASK_QUEUE_LEN, sizeof(request_t));
     canopen_handlers_mutex = xSemaphoreCreateMutex();
     cobid_mutex = xSemaphoreCreateMutex();
 
@@ -805,8 +1174,8 @@ esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
     node_cfg.io_cfg.rx = (gpio_num_t) cfg->can_rx_pin;
     node_cfg.io_cfg.quanta_clk_out = GPIO_NUM_NC;
     node_cfg.io_cfg.bus_off_indicator = GPIO_NUM_NC;
-    node_cfg.bit_timing.bitrate = 1000000;
-    node_cfg.tx_queue_depth = 8;
+    node_cfg.bit_timing.bitrate = cfg->can_bitrate != 0u ? cfg->can_bitrate : DEFAULT_CAN_BITRATE;
+    node_cfg.tx_queue_depth = CANOPEN_TWAI_TX_QUEUE_DEPTH;
     node_cfg.fail_retry_cnt = -1;
     node_cfg.flags.no_receive_rtr = 1;
 
@@ -828,6 +1197,26 @@ esp_err_t canopen_initialize(const canopen_init_cfg_t *cfg)
 
     can_bus_off = false;
     can_recovering = false;
+    taskENTER_CRITICAL(&can_driver_event_mux);
+    can_driver_error_event = false;
+    can_driver_state_change_event = false;
+    can_driver_old_state = 0;
+    can_driver_new_state = 0;
+    can_driver_error_flags = 0;
+    can_driver_error_count = 0;
+    can_driver_state_change_count = 0;
+    can_driver_rx_queue_drop_count = 0;
+    can_driver_rx_read_fail_count = 0;
+    can_driver_async_tx_drop_count = 0;
+    taskEXIT_CRITICAL(&can_driver_event_mux);
+
+    ESP_LOGI(TAG,
+             "TWAI init: tx=%d rx=%d bitrate=%" PRIu32 " timeout_ms=%" PRIu32 " txq=%u",
+             cfg->can_tx_pin,
+             cfg->can_rx_pin,
+             node_cfg.bit_timing.bitrate,
+             (uint32_t) cfg->max_delay_ms,
+             (unsigned) node_cfg.tx_queue_depth);
 
     xTaskCreatePinnedToCore(canopen_dispatch_task, "dispatch", 4096, NULL, 8, &dispatch_task_handle, tskNO_AFFINITY);
     xTaskCreatePinnedToCore(canopen_transmit_task, "transmit", 4096, NULL, 9, &tx_task_handle, tskNO_AFFINITY);
@@ -920,6 +1309,14 @@ esp_err_t canopen_wait_shutdown(void)
 
     can_bus_off = false;
     can_recovering = false;
+    taskENTER_CRITICAL(&can_driver_event_mux);
+    can_driver_error_event = false;
+    can_driver_state_change_event = false;
+    can_driver_old_state = 0;
+    can_driver_new_state = 0;
+    can_driver_error_count = 0;
+    can_driver_state_change_count = 0;
+    taskEXIT_CRITICAL(&can_driver_event_mux);
 
     return ESP_OK;
 }
@@ -1176,6 +1573,33 @@ esp_err_t canopen_pdo_send(uint8_t node,
     return canopen_send(&msg);
 }
 
+esp_err_t canopen_pdo_post(uint8_t node,
+                           uint8_t rpdo_num,
+                           uint32_t cob_id_override,
+                           const void *data,
+                           size_t len)
+{
+    twai_message_t msg = {
+        .extd = 0,
+        .rtr = 0,
+        .ss = 0,
+        .self = 0,
+        .dlc_non_comp = 0,
+        .identifier = cob_id_override != 0u ? cob_id_override : canopen_default_pdo_cobid(node, CANOPEN_PDO_RX, rpdo_num),
+        .data_length_code = 0,
+    };
+
+    ESP_RETURN_ON_FALSE(rpdo_num >= 1u && rpdo_num <= 4u, ESP_ERR_INVALID_ARG, TAG, "invalid RPDO number");
+    ESP_RETURN_ON_FALSE(len <= 8u, ESP_ERR_INVALID_ARG, TAG, "PDO payload too large");
+    if (len > 0u) {
+        ESP_RETURN_ON_FALSE(data != NULL, ESP_ERR_INVALID_ARG, TAG, "data is NULL");
+        memcpy(msg.data, data, len);
+    }
+    msg.data_length_code = (uint8_t)len;
+
+    return canopen_post(&msg);
+}
+
 esp_err_t canopen_pdo_subscribe(uint8_t node,
                                 uint8_t tpdo_num,
                                 uint32_t cob_id_override,
@@ -1207,7 +1631,7 @@ static esp_err_t canopen_pdo_payload_put(canopen_pdo_payload_t *p, const void *s
 
     memcpy(&p->data[p->len], src, n);
     p->len += n;
-    return result;
+    return ESP_OK;
 }
 
 esp_err_t canopen_pdo_payload_put_u8(canopen_pdo_payload_t *p, uint8_t v)
