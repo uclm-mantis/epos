@@ -1,4 +1,4 @@
-version: "2.0.0"
+version: "2.0.0-idf5"
 description: "CANopen support for ESP-IDF"
 targets:
   - esp32
@@ -11,4 +11,4 @@ targets:
 license: "LGPL-2.1"
 url: "https://github.com/uclm-mantis/epos"
 dependencies:
-  idf: ">=6.0"
+  idf: ">=5.5,<6.0"

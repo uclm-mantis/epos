@@ -6,8 +6,7 @@
 #include <string.h>
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
-#include "esp_twai.h"
-#include "esp_twai_onchip.h"
+#include "driver/twai.h"
 #include "canopen_types.h"
 
 #ifdef __cplusplus
