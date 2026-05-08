@@ -4,9 +4,6 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include "driver/usb_serial_jtag.h"
-#include "driver/usb_serial_jtag_vfs.h"
 #include "esp_console.h"
 #include "esp_check.h"
 #include "argtable3/argtable3.h"
@@ -669,33 +666,6 @@ void canopen_console_init(const canopen_console_cfg_t* cfg)
     // Inicializar valores de contexto con valores reales del canopen core.
     default_ctx.sdo_timeout = canopen_get_max_delay_ms();
     default_ctx.dump_msg = canopen_is_dump_enabled();
-
-    if (cfg->enable_usb_console) {
-#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
-        fflush(stdout);
-        fsync(fileno(stdout));
-
-        usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
-        usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
-
-        fcntl(fileno(stdout), F_SETFL, 0);
-        fcntl(fileno(stdin), F_SETFL, 0);
-
-        usb_serial_jtag_driver_config_t jtag_cfg = {
-            .tx_buffer_size = cfg->tx_buffer_size,
-            .rx_buffer_size = cfg->rx_buffer_size,
-        };
-        esp_err_t err = usb_serial_jtag_driver_install(&jtag_cfg);
-        if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-            ESP_ERROR_CHECK(err);
-        }
-
-        usb_serial_jtag_vfs_use_driver();
-        setvbuf(stdin, NULL, _IONBF, 0);
-#else
-        ESP_LOGW(TAG, "USB console requested, but CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not enabled");
-#endif
-    }
 
     esp_console_config_t console_config = {
         .max_cmdline_args   = 8,
