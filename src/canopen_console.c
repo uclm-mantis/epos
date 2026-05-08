@@ -4,8 +4,6 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
-#include "driver/usb_serial_jtag.h"
-#include "driver/usb_serial_jtag_vfs.h"
 #include "esp_console.h"
 #include "esp_check.h"
 #include "argtable3/argtable3.h"
@@ -668,34 +666,6 @@ void canopen_console_init(const canopen_console_cfg_t* cfg)
     // Inicializar valores de contexto con valores reales del canopen core.
     default_ctx.sdo_timeout = canopen_get_max_delay_ms();
     default_ctx.dump_msg = canopen_is_dump_enabled();
-
-    fflush(stdout);
-    fsync(fileno(stdout));
-
-    // ---- CONFIGURAR DISPOSITIVO DE CONSOLA SOBRE USB SERIAL/JTAG ----
-    // Equivalente a la rama USB-SJTAG del ejemplo console/advanced
-
-    // Fin de línea que llega del monitor (idf.py monitor manda CR al pulsar Enter)
-    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
-    // Cómo queremos que se envíen los \n
-    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
-
-    // Modo bloqueante en stdin/stdout (importante para linenoise)
-    fcntl(fileno(stdout), F_SETFL, 0);
-    fcntl(fileno(stdin),  F_SETFL, 0);
-
-    // Instalar driver USB-SJTAG
-    usb_serial_jtag_driver_config_t jtag_cfg = {
-        .tx_buffer_size = cfg->tx_buffer_size,   // o un valor fijo, p.ej. 256
-        .rx_buffer_size = cfg->rx_buffer_size,
-    };
-    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&jtag_cfg));
-
-    // Decir al VFS que use el driver USB-SJTAG para stdin/stdout/stderr
-    usb_serial_jtag_vfs_use_driver();
-
-    // Importante para que no haya buffering en stdin
-    setvbuf(stdin, NULL, _IONBF, 0);
 
     esp_console_config_t console_config = {
         .max_cmdline_args   = 8,
