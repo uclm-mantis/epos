@@ -1,0 +1,26 @@
+dependencies:
+  epos:
+    dependencies:
+    - name: idf
+      version: '>=5.4,<6.0'
+    source:
+      path: E:\git\esp\epos
+      type: local
+    targets:
+    - esp32
+    - esp32c3
+    - esp32c6
+    - esp32s2
+    - esp32s3
+    - esp32h2
+    - esp32p4
+    version: 2.0.0-idf5
+  idf:
+    source:
+      type: idf
+    version: 5.5.3
+direct_dependencies:
+- epos
+manifest_hash: 38b660532ff3ac7240f11ff7fb81e1e3b3aba54597b7cf994e177dcf93c3023f
+target: esp32s3
+version: 2.0.0
