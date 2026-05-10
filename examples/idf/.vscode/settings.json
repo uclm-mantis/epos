@@ -1,5 +1,5 @@
 {
-  "idf.currentSetup": "C:\\esp\\v6.0\\esp-idf",
+  "idf.currentSetup": "C:\\esp\\v5.5.3\\esp-idf",
   "idf.customExtraVars": {
     "OPENOCD_SCRIPTS": "C:\\Users\\Francisco.Moya\\.espressif\\tools\\openocd-esp32\\v0.12.0-esp32-20240318/openocd-esp32/share/openocd/scripts",
     "IDF_CCACHE_ENABLE": "1",

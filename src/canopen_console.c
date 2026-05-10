@@ -28,6 +28,7 @@
 static const char *TAG = "cia309";
 static TaskHandle_t usb_console_task_handle;
 static TaskHandle_t tcp_console_task_handle;
+static bool console_dumb_mode;
 
 
 /*
@@ -658,6 +659,27 @@ static void completion_callback(const char *buf, linenoiseCompletions *lc)
 void canopen_console_task(void *arg);
 void tcp_console_task(void *arg);
 
+static void configure_usb_serial_jtag_console(const canopen_console_cfg_t *cfg)
+{
+    fflush(stdout);
+    fsync(fileno(stdout));
+
+    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
+    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
+
+    fcntl(fileno(stdout), F_SETFL, 0);
+    fcntl(fileno(stdin),  F_SETFL, 0);
+
+    usb_serial_jtag_driver_config_t jtag_cfg = {
+        .tx_buffer_size = cfg->tx_buffer_size,
+        .rx_buffer_size = cfg->rx_buffer_size,
+    };
+    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&jtag_cfg));
+    usb_serial_jtag_vfs_use_driver();
+
+    setvbuf(stdin, NULL, _IONBF, 0);
+}
+
 void canopen_console_init(const canopen_console_cfg_t* cfg)
 {
     // Si cfg es NULL, aplicar configuración por defecto.
@@ -670,33 +692,9 @@ void canopen_console_init(const canopen_console_cfg_t* cfg)
     default_ctx.sdo_timeout = canopen_get_max_delay_ms();
     default_ctx.dump_msg = canopen_is_dump_enabled();
 
-    fflush(stdout);
-    fsync(fileno(stdout));
-
-    // ---- CONFIGURAR DISPOSITIVO DE CONSOLA SOBRE USB SERIAL/JTAG ----
-    // Equivalente a la rama USB-SJTAG del ejemplo console/advanced
-
-    // Fin de línea que llega del monitor (idf.py monitor manda CR al pulsar Enter)
-    usb_serial_jtag_vfs_set_rx_line_endings(ESP_LINE_ENDINGS_CR);
-    // Cómo queremos que se envíen los \n
-    usb_serial_jtag_vfs_set_tx_line_endings(ESP_LINE_ENDINGS_CRLF);
-
-    // Modo bloqueante en stdin/stdout (importante para linenoise)
-    fcntl(fileno(stdout), F_SETFL, 0);
-    fcntl(fileno(stdin),  F_SETFL, 0);
-
-    // Instalar driver USB-SJTAG
-    usb_serial_jtag_driver_config_t jtag_cfg = {
-        .tx_buffer_size = cfg->tx_buffer_size,   // o un valor fijo, p.ej. 256
-        .rx_buffer_size = cfg->rx_buffer_size,
-    };
-    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&jtag_cfg));
-
-    // Decir al VFS que use el driver USB-SJTAG para stdin/stdout/stderr
-    usb_serial_jtag_vfs_use_driver();
-
-    // Importante para que no haya buffering en stdin
-    setvbuf(stdin, NULL, _IONBF, 0);
+    if (cfg->enable_usb_console) {
+        configure_usb_serial_jtag_console(cfg);
+    }
 
     esp_console_config_t console_config = {
         .max_cmdline_args   = 8,
@@ -704,20 +702,23 @@ void canopen_console_init(const canopen_console_cfg_t* cfg)
     };
     ESP_ERROR_CHECK(esp_console_init(&console_config));
 
-    linenoiseSetMultiLine(0);
-    linenoiseSetCompletionCallback(&completion_callback);
-    linenoiseHistorySetMaxLen(100);
     linenoiseSetMaxLineLen(console_config.max_cmdline_length);
     linenoiseAllowEmpty(false);
+    if (cfg->dumb_mode) {
+        ESP_LOGI(TAG, "Dumb mode enabled. Line editing, completion and history are disabled.");
+        console_dumb_mode = true;
+        linenoiseSetDumbMode(1);
+        linenoiseHistorySetMaxLen(0);
+    } else {
+        console_dumb_mode = false;
+        linenoiseSetMultiLine(0);
+        linenoiseSetCompletionCallback(&completion_callback);
+        linenoiseHistorySetMaxLen(100);
+    }
 
     od = cfg->object_dictionary;
     od_len = cfg->object_dictionary_entries;
     ESP_LOGI(TAG, "Console initialized with %d object dictionary entries", (int)od_len);
-
-    if (cfg->dumb_mode) {
-        ESP_LOGI(TAG, "Dumb mode enabled. Line editing and history features are disabled, but ANSI escape codes will be printed (e.g. colors).");
-        linenoiseSetDumbMode(1);
-    }
 
     if (cfg->enable_tcp_console) {
         xTaskCreatePinnedToCore(tcp_console_task, "tcp_console", 4096, NULL, 8, &tcp_console_task_handle, tskNO_AFFINITY);
@@ -735,7 +736,9 @@ void canopen_console_task(void *arg)
         char* line = linenoise(CONFIG_EPOS_CONSOLE_PROMPT);
         if (line == NULL) continue;
         if (strlen(line) > 0) {
-            linenoiseHistoryAdd(line);
+            if (!console_dumb_mode) {
+                linenoiseHistoryAdd(line);
+            }
             canopen_console_run(line);
         }
         linenoiseFree(line);

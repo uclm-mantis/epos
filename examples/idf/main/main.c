@@ -82,6 +82,7 @@ void app_main(void)
     canopen_console_cfg_t console_cfg = CANOPEN_CONSOLE_DEFAULT();
     console_cfg.enable_usb_console = true;
     console_cfg.enable_tcp_console = false;
+    console_cfg.dumb_mode = true;
     canopen_console_init(&console_cfg);
     canopen_console_register_commands();
     motor_register_commands();
