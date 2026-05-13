@@ -140,7 +140,7 @@ static void canopen_append_flag(char *buf, size_t len, bool *first, const char *
     *first = false;
 }
 
-static void canopen_format_error_flags(uint32_t flags, char *buf, size_t len)
+static void canopen_format_alert_flags(uint32_t flags, char *buf, size_t len)
 {
     bool first = true;
 
@@ -154,20 +154,20 @@ static void canopen_format_error_flags(uint32_t flags, char *buf, size_t len)
         return;
     }
 
-    if ((flags & (1u << 0)) != 0u) {
+    if ((flags & TWAI_ALERT_ARB_LOST) != 0u) {
         canopen_append_flag(buf, len, &first, "arb_lost");
     }
-    if ((flags & (1u << 1)) != 0u) {
-        canopen_append_flag(buf, len, &first, "bit");
+    if ((flags & TWAI_ALERT_ABOVE_ERR_WARN) != 0u) {
+        canopen_append_flag(buf, len, &first, "above_warn");
     }
-    if ((flags & (1u << 2)) != 0u) {
-        canopen_append_flag(buf, len, &first, "form");
+    if ((flags & TWAI_ALERT_BUS_ERROR) != 0u) {
+        canopen_append_flag(buf, len, &first, "bus_error");
     }
-    if ((flags & (1u << 3)) != 0u) {
-        canopen_append_flag(buf, len, &first, "stuff");
+    if ((flags & TWAI_ALERT_TX_FAILED) != 0u) {
+        canopen_append_flag(buf, len, &first, "tx_failed");
     }
-    if ((flags & (1u << 4)) != 0u) {
-        canopen_append_flag(buf, len, &first, "ack");
+    if ((flags & TWAI_ALERT_ERR_PASS) != 0u) {
+        canopen_append_flag(buf, len, &first, "err_pass");
     }
 
     if (first) {
@@ -244,7 +244,7 @@ static void canopen_maybe_log_driver_events(void)
 
     if (log_error) {
         char flags_buf[48];
-        canopen_format_error_flags(error_flags, flags_buf, sizeof(flags_buf));
+        canopen_format_alert_flags(error_flags, flags_buf, sizeof(flags_buf));
         if (have_info) {
             ESP_LOGW(TAG,
                      "TWAI error event: flags=%s tx_err=%u rx_err=%u bus_err=%" PRIu32 " state=%s%s",
@@ -441,6 +441,53 @@ static bool canopen_take_pending_response(const twai_message_t *msg, response_t 
     taskEXIT_CRITICAL(&pending_resp_mux);
 
     return found;
+}
+
+static void canopen_remove_pending_response(uint32_t cobid, TaskHandle_t waiter)
+{
+    taskENTER_CRITICAL(&pending_resp_mux);
+    for (int i = 0; i < N_ELEMS(pending_resp_table); ++i) {
+        if (pending_resp_table[i].in_use &&
+            pending_resp_table[i].resp.cobid == cobid &&
+            pending_resp_table[i].resp.waiter == waiter) {
+            pending_resp_table[i].in_use = false;
+        }
+    }
+    taskEXIT_CRITICAL(&pending_resp_mux);
+}
+
+static void canopen_recover_after_timeout(uint32_t tx_cobid)
+{
+    twai_status_info_t status = {0};
+
+    if (!twai_driver_ready || twai_get_status_info(&status) != ESP_OK) {
+        return;
+    }
+
+    if (status.state == TWAI_STATE_BUS_OFF || status.state == TWAI_STATE_RECOVERING) {
+        (void) canopen_try_recover_bus();
+        return;
+    }
+
+    if (status.state == TWAI_STATE_RUNNING &&
+        (status.msgs_to_tx > 0u || status.tx_error_counter >= 96u)) {
+        ESP_LOGW(TAG,
+                 "Resetting TWAI after timeout on COB-ID 0x%03" PRIx32
+                 " tx_pending=%" PRIu32 " tx_err=%u rx_err=%u bus_err=%" PRIu32,
+                 tx_cobid,
+                 status.msgs_to_tx,
+                 (unsigned) status.tx_error_counter,
+                 (unsigned) status.rx_error_counter,
+                 status.bus_error_count);
+        if (twai_stop() == ESP_OK) {
+            esp_err_t err = twai_start();
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "twai_start after timeout failed: %s", esp_err_to_name(err));
+            }
+        }
+        can_bus_off = false;
+        can_recovering = false;
+    }
 }
 
 static void dump_msg(const char* info, twai_message_t* msg)
@@ -787,7 +834,7 @@ static esp_err_t sdo_download_segment_request(request_t* self)
 static void sdo_download_segment_response(response_t* self, twai_message_t* msg)
 {
     dump_msg("Rx Seg", msg);
-    twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
+    twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 1, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
     if (self->size > 0) {
         SDO_download_seg_resp_t* resp = (SDO_download_seg_resp_t*) msg->data;
         SDO_download_seg_req_t* req_payload = (SDO_download_seg_req_t*) req_msg.data;
@@ -849,7 +896,7 @@ static esp_err_t sdo_download_request(request_t* self)
 esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void* value, size_t size)
 {
     esp_err_t result = ESP_OK;
-    twai_message_t msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = id, .data_length_code = 8 };
+    twai_message_t msg = { .extd = 0, .rtr = 0, .ss = 1, .self = 0, .dlc_non_comp = 0, .identifier = id, .data_length_code = 8 };
     SDO_download_req_t* payload = (SDO_download_req_t*) msg.data;
     if (size <= 4) {
         *payload = (SDO_download_req_t){ .s = 1, .e = 1, .n = 4 - size, .x = 0, .ccs = SDO_CCS_DOWNLOAD, .index = index, .subindex = subindex};
@@ -862,6 +909,8 @@ esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void* valu
     request_t req = { .run = sdo_download_request, .msg = msg, .value = value, .size = size, .waiter = waiter, .result_out = &result };
     xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     if (ulTaskNotifyTake(pdTRUE, max_delay) != pdTRUE) {
+        canopen_remove_pending_response(id - 0x600 + 0x580, waiter);
+        canopen_recover_after_timeout(id);
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
         return ESP_FAIL;
     }
@@ -879,7 +928,7 @@ static void sdo_upload_segment_response(response_t* self, twai_message_t* msg)
     if (payload->c) {
         xTaskNotifyGive(self->waiter);
     } else {
-        twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
+        twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 1, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
         SDO_upload_seq_req_t* req_payload = (SDO_upload_seq_req_t*) req_msg.data;
         *req_payload = (SDO_upload_seq_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD_SEG, .t = !payload->t, .reserved = {0} };
         request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .waiter = self->waiter, .result_out = self->result_out };
@@ -919,7 +968,7 @@ static void sdo_upload_response(response_t* self, twai_message_t* msg)
     if (payload->e) {
         xTaskNotifyGive(self->waiter);
     } else {
-        twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 0, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
+        twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 1, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
         SDO_upload_seq_req_t* payload = (SDO_upload_seq_req_t*) req_msg.data;
         *payload = (SDO_upload_seq_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD_SEG, .t = 0, .reserved = {0} };
         request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .waiter = self->waiter, .result_out = self->result_out };
@@ -958,7 +1007,7 @@ esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void *ret)
     twai_message_t msg = {
         .extd = 0,
         .rtr = 0,
-        .ss = 0,
+        .ss = 1,
         .self = 0,
         .dlc_non_comp = 0,
         .identifier = id,
@@ -991,6 +1040,8 @@ esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void *ret)
     }
 
     if (ulTaskNotifyTake(pdTRUE, max_delay) != pdTRUE) {
+        canopen_remove_pending_response(id - 0x600 + 0x580, waiter);
+        canopen_recover_after_timeout(id);
         ESP_LOGI(TAG, "Peer does not seem to be available, unconfirmed request");
         return ESP_FAIL;
     }
