@@ -8,7 +8,10 @@
 #include "sdkconfig.h"
 #include "driver/uart.h"
 #include "driver/uart_vfs.h"
-#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED
+#ifndef CONFIG_USJ_ENABLE_USB_SERIAL_JTAG
+#define CONFIG_USJ_ENABLE_USB_SERIAL_JTAG 0
+#endif
+#if CONFIG_USJ_ENABLE_USB_SERIAL_JTAG
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
 #endif
@@ -666,7 +669,7 @@ void tcp_console_task(void *arg);
 
 static void configure_usb_serial_jtag_console(const canopen_console_cfg_t *cfg)
 {
-#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED
+#if CONFIG_USJ_ENABLE_USB_SERIAL_JTAG
     fflush(stdout);
     fsync(fileno(stdout));
 
@@ -686,7 +689,7 @@ static void configure_usb_serial_jtag_console(const canopen_console_cfg_t *cfg)
     setvbuf(stdin, NULL, _IONBF, 0);
 #else
     (void)cfg;
-    ESP_LOGE(TAG, "USB-JTAG console requires CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED=y");
+    ESP_LOGE(TAG, "USB-JTAG console requires CONFIG_USJ_ENABLE_USB_SERIAL_JTAG=y");
     ESP_ERROR_CHECK(ESP_ERR_NOT_SUPPORTED);
 #endif
 }

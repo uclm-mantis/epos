@@ -1,0 +1,21 @@
+menu "EPOS example configuration"
+
+    choice EPOS_EXAMPLE_CONSOLE_TRANSPORT
+        prompt "Interactive console transport"
+        default EPOS_EXAMPLE_CONSOLE_UART
+        help
+            Selects the transport used by the interactive EPOS console in this
+            example. UART0 is the default so the firmware does not depend on a
+            connected USB Serial/JTAG host during boot.
+
+        config EPOS_EXAMPLE_CONSOLE_UART
+            bool "UART0"
+
+        config EPOS_EXAMPLE_CONSOLE_USB_SERIAL_JTAG
+            bool "USB Serial/JTAG"
+            depends on SOC_USB_SERIAL_JTAG_SUPPORTED
+            select USJ_ENABLE_USB_SERIAL_JTAG
+
+    endchoice
+
+endmenu

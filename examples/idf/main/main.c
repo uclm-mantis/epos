@@ -145,6 +145,14 @@ void app_main(void)
     canopen_console_cfg_t console_cfg = CANOPEN_CONSOLE_DEFAULT();
     console_cfg.enable_tcp_console = false;
     console_cfg.dumb_mode = true;
+#if CONFIG_EPOS_EXAMPLE_CONSOLE_USB_SERIAL_JTAG
+    console_cfg.enable_usb_console = true;
+    console_cfg.enable_uart_console = false;
+#else
+    console_cfg.enable_usb_console = false;
+    console_cfg.enable_uart_console = true;
+    console_cfg.uart_num = 0;
+#endif
 
     bool telemetry_uart_available = !(console_cfg.enable_uart_console &&
                                       console_cfg.uart_tx_pin == EXAMPLE_UART_TX_PIN &&
@@ -162,7 +170,12 @@ void app_main(void)
     canopen_console_register_commands();
     motor_register_commands();
 
-    ESP_LOGI(TAG, "Console initialized. Telemetry UART%d TX=%d RX=%d at %d baud.",
+    ESP_LOGI(TAG, "Console initialized on %s. Telemetry UART%d TX=%d RX=%d at %d baud.",
+#if CONFIG_EPOS_EXAMPLE_CONSOLE_USB_SERIAL_JTAG
+             "USB Serial/JTAG",
+#else
+             "UART0",
+#endif
              EXAMPLE_UART_PORT,
              EXAMPLE_UART_TX_PIN,
              EXAMPLE_UART_RX_PIN,

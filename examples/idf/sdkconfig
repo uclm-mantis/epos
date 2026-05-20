@@ -595,6 +595,13 @@ CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
 
 #
+# EPOS example configuration
+#
+CONFIG_EPOS_EXAMPLE_CONSOLE_UART=y
+# CONFIG_EPOS_EXAMPLE_CONSOLE_USB_SERIAL_JTAG is not set
+# end of EPOS example configuration
+
+#
 # Compiler options
 #
 CONFIG_COMPILER_OPTIMIZATION_DEBUG=y
