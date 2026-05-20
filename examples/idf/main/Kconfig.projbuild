@@ -14,7 +14,7 @@ menu "EPOS example configuration"
         config EPOS_EXAMPLE_CONSOLE_USB_SERIAL_JTAG
             bool "USB Serial/JTAG"
             depends on SOC_USB_SERIAL_JTAG_SUPPORTED
-            select USJ_ENABLE_USB_SERIAL_JTAG
+            select ESP_CONSOLE_USB_SERIAL_JTAG
 
     endchoice
 
