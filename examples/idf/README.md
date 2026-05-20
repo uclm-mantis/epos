@@ -1,8 +1,8 @@
 # EPOS ESP-IDF console plus independent UART example
 
-This example keeps the interactive `esp_console`/`linenoise` console on USB Serial/JTAG and uses a separate UART for periodic bytes on GPIO 43 and GPIO 44.
+This example keeps the interactive `esp_console`/`linenoise` console on the ESP-IDF primary console transport and can use a separate UART for periodic bytes on GPIO 43 and GPIO 44.
 
-The important part is that the telemetry UART is never attached to VFS or standard I/O. `stdin`, `stdout` and `stderr` remain owned by the USB-JTAG console, while UART1 is used only through `uart_write_bytes()`.
+The important part is that the telemetry UART is never attached to VFS or standard I/O. `stdin`, `stdout` and `stderr` remain owned by the configured interactive console transport, while UART1 is used only through `uart_write_bytes()` when its pins do not overlap with the console pins.
 
 ## Hardware
 
@@ -10,9 +10,10 @@ The important part is that the telemetry UART is never attached to VFS or standa
 - UART TX: GPIO 43.
 - UART RX: GPIO 44.
 - UART speed: 115200 8N1.
+- Status RGB LED: WS2812-compatible LED on GPIO 48, toggled every 500 ms.
 - CAN in this example: TX GPIO 14, RX GPIO 15, 1 Mbit/s.
 
-Do not use GPIO 19 or GPIO 20 for CAN when the console is on USB Serial/JTAG on ESP32-S3. Those pins are used by native USB, and reconfiguring them for TWAI can disconnect the monitor.
+Do not use GPIO 19 or GPIO 20 for CAN when USB Serial/JTAG is enabled on ESP32-S3. Those pins are used by native USB, and reconfiguring them for TWAI can disconnect the monitor.
 
 Adjust `EXAMPLE_UART_TX_PIN`, `EXAMPLE_UART_RX_PIN` or the CAN pins in `main/main.c` if your board uses different pins.
 
@@ -23,9 +24,9 @@ idf.py set-target esp32s3
 idf.py build flash monitor
 ```
 
-The monitor opens the USB-JTAG console. Use `help` or `about` to see the EPOS/CANopen commands.
+The monitor opens the configured interactive console. Use `help` or `about` to see the EPOS/CANopen commands.
 
-The second UART periodically prints messages like:
+When its pins do not overlap with the console, the second UART periodically prints messages like:
 
 ```text
 EPOS UART heartbeat 1

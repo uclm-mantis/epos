@@ -596,15 +596,33 @@ typedef struct {
     int tx_buffer_size;
     bool dumb_mode;
     bool enable_usb_console;
+    bool enable_uart_console;
     bool enable_tcp_console;
+    int uart_num;
+    int uart_tx_pin;
+    int uart_rx_pin;
+    int uart_baud_rate;
     const object_dictionary_entry_t *object_dictionary;
     size_t object_dictionary_entries;
 } canopen_console_cfg_t;
 ```
 
-Default configuration enables the USB console and disables the TCP console. The TCP console listens on port 3344.
+Default configuration follows the ESP-IDF primary console transport: USB Serial/JTAG when `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED` is set, otherwise UART when `CONFIG_ESP_CONSOLE_UART` is set. The TCP console is disabled by default and listens on port 3344 when enabled. The UART console defaults to UART0 at 115200 baud, TX GPIO 43 and RX GPIO 44; these values can be changed through `menuconfig` or by overriding `uart_num`, `uart_tx_pin`, `uart_rx_pin` and `uart_baud_rate` before calling `canopen_console_init()`.
 
 Use `CANOPEN_CONSOLE_DEFAULT()` for a default configuration; passing `NULL` to `canopen_console_init()` applies it automatically.
+
+To run the interactive console on UART0 instead of USB Serial/JTAG:
+
+```c
+canopen_console_cfg_t console_cfg = CANOPEN_CONSOLE_DEFAULT();
+console_cfg.enable_usb_console = false;
+console_cfg.enable_uart_console = true;
+console_cfg.uart_tx_pin = 43;
+console_cfg.uart_rx_pin = 44;
+canopen_console_init(&console_cfg);
+```
+
+If both `enable_usb_console` and `enable_uart_console` are set, UART is used for `stdin`/`stdout` because the linenoise console is attached to a single VFS transport.
 
 ### Supported commands
 

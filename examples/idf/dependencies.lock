@@ -4,7 +4,7 @@ dependencies:
     - name: idf
       version: '>=5.4,<6.0'
     source:
-      path: E:\git\esp\epos
+      path: C:\git\esp\epos
       type: local
     targets:
     - esp32
@@ -18,7 +18,7 @@ dependencies:
   idf:
     source:
       type: idf
-    version: 5.5.3
+    version: 5.5.2
 direct_dependencies:
 - epos
 manifest_hash: 38b660532ff3ac7240f11ff7fb81e1e3b3aba54597b7cf994e177dcf93c3023f

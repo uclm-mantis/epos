@@ -2,6 +2,41 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
+
+#if defined __has_include
+#if __has_include("sdkconfig.h")
+#include "sdkconfig.h"
+#endif
+#endif
+
+#ifndef CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED
+#ifdef CONFIG_IDF_TARGET
+#define CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED 0
+#else
+#define CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED 1
+#endif
+#endif
+
+#ifndef CONFIG_ESP_CONSOLE_UART
+#define CONFIG_ESP_CONSOLE_UART 0
+#endif
+
+#ifndef CONFIG_EPOS_CONSOLE_UART_NUM
+#define CONFIG_EPOS_CONSOLE_UART_NUM 0
+#endif
+
+#ifndef CONFIG_EPOS_CONSOLE_UART_TX_PIN
+#define CONFIG_EPOS_CONSOLE_UART_TX_PIN 43
+#endif
+
+#ifndef CONFIG_EPOS_CONSOLE_UART_RX_PIN
+#define CONFIG_EPOS_CONSOLE_UART_RX_PIN 44
+#endif
+
+#ifndef CONFIG_EPOS_CONSOLE_UART_BAUD_RATE
+#define CONFIG_EPOS_CONSOLE_UART_BAUD_RATE 115200
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,7 +63,12 @@ typedef struct {
     int tx_buffer_size;
     bool dumb_mode;
     bool enable_usb_console;
+    bool enable_uart_console;
     bool enable_tcp_console;
+    int uart_num;
+    int uart_tx_pin;
+    int uart_rx_pin;
+    int uart_baud_rate;
     const object_dictionary_entry_t* object_dictionary;
     size_t object_dictionary_entries;
 } canopen_console_cfg_t;
@@ -37,8 +77,13 @@ typedef struct {
     .rx_buffer_size = 256, \
     .tx_buffer_size = 256, \
     .dumb_mode = false, \
-    .enable_usb_console = true, \
+    .enable_usb_console = CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED, \
+    .enable_uart_console = (!CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED && CONFIG_ESP_CONSOLE_UART), \
     .enable_tcp_console = false, \
+    .uart_num = CONFIG_EPOS_CONSOLE_UART_NUM, \
+    .uart_tx_pin = CONFIG_EPOS_CONSOLE_UART_TX_PIN, \
+    .uart_rx_pin = CONFIG_EPOS_CONSOLE_UART_RX_PIN, \
+    .uart_baud_rate = CONFIG_EPOS_CONSOLE_UART_BAUD_RATE, \
     .object_dictionary = NULL, \
     .object_dictionary_entries = 0, \
 }

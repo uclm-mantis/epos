@@ -5,10 +5,16 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include "sdkconfig.h"
+#include "driver/uart.h"
+#include "driver/uart_vfs.h"
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
+#endif
 #include "esp_console.h"
 #include "esp_check.h"
+#include "esp_err.h"
 #include "argtable3/argtable3.h"
 #include "linenoise/linenoise.h"
 #include "canopen.h"
@@ -21,12 +27,11 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "sdkconfig.h"
 
 #define TCP_PORT 3344  // Puerto conforme a CANopen CiA 309
 
 static const char *TAG = "cia309";
-static TaskHandle_t usb_console_task_handle;
+static TaskHandle_t serial_console_task_handle;
 static TaskHandle_t tcp_console_task_handle;
 static bool console_dumb_mode;
 
@@ -661,6 +666,7 @@ void tcp_console_task(void *arg);
 
 static void configure_usb_serial_jtag_console(const canopen_console_cfg_t *cfg)
 {
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED
     fflush(stdout);
     fsync(fileno(stdout));
 
@@ -678,6 +684,60 @@ static void configure_usb_serial_jtag_console(const canopen_console_cfg_t *cfg)
     usb_serial_jtag_vfs_use_driver();
 
     setvbuf(stdin, NULL, _IONBF, 0);
+#else
+    (void)cfg;
+    ESP_LOGE(TAG, "USB-JTAG console requires CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED=y");
+    ESP_ERROR_CHECK(ESP_ERR_NOT_SUPPORTED);
+#endif
+}
+
+static void configure_uart_console(const canopen_console_cfg_t *cfg)
+{
+    fflush(stdout);
+    fsync(fileno(stdout));
+
+    const uart_port_t uart_num = (uart_port_t)cfg->uart_num;
+    const uart_config_t uart_config = {
+        .baud_rate = cfg->uart_baud_rate,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    ESP_ERROR_CHECK(uart_param_config(uart_num, &uart_config));
+    ESP_ERROR_CHECK(uart_set_pin(uart_num,
+                                 cfg->uart_tx_pin,
+                                 cfg->uart_rx_pin,
+                                 UART_PIN_NO_CHANGE,
+                                 UART_PIN_NO_CHANGE));
+
+    esp_err_t err = uart_driver_install(uart_num,
+                                        cfg->rx_buffer_size,
+                                        cfg->tx_buffer_size,
+                                        0,
+                                        NULL,
+                                        0);
+    if (err != ESP_ERR_INVALID_STATE) {
+        ESP_ERROR_CHECK(err);
+    }
+
+    uart_vfs_dev_port_set_rx_line_endings(uart_num, ESP_LINE_ENDINGS_CR);
+    uart_vfs_dev_port_set_tx_line_endings(uart_num, ESP_LINE_ENDINGS_CRLF);
+
+    fcntl(fileno(stdout), F_SETFL, 0);
+    fcntl(fileno(stdin),  F_SETFL, 0);
+
+    uart_vfs_dev_use_driver(uart_num);
+
+    setvbuf(stdin, NULL, _IONBF, 0);
+
+    ESP_LOGI(TAG, "UART%d console ready on TX=%d RX=%d at %d baud.",
+             cfg->uart_num,
+             cfg->uart_tx_pin,
+             cfg->uart_rx_pin,
+             cfg->uart_baud_rate);
 }
 
 void canopen_console_init(const canopen_console_cfg_t* cfg)
@@ -692,7 +752,14 @@ void canopen_console_init(const canopen_console_cfg_t* cfg)
     default_ctx.sdo_timeout = canopen_get_max_delay_ms();
     default_ctx.dump_msg = canopen_is_dump_enabled();
 
-    if (cfg->enable_usb_console) {
+    if (cfg->enable_usb_console && cfg->enable_uart_console) {
+        ESP_LOGW(TAG, "USB-JTAG and UART console enabled; using UART%d for stdin/stdout.",
+                 cfg->uart_num);
+    }
+
+    if (cfg->enable_uart_console) {
+        configure_uart_console(cfg);
+    } else if (cfg->enable_usb_console) {
         configure_usb_serial_jtag_console(cfg);
     }
 
@@ -724,8 +791,8 @@ void canopen_console_init(const canopen_console_cfg_t* cfg)
         xTaskCreatePinnedToCore(tcp_console_task, "tcp_console", 4096, NULL, 8, &tcp_console_task_handle, tskNO_AFFINITY);
     }
 
-    if (cfg->enable_usb_console) {
-        xTaskCreatePinnedToCore(canopen_console_task, "usb_console", 4096, NULL, 8, &usb_console_task_handle, tskNO_AFFINITY);
+    if (cfg->enable_usb_console || cfg->enable_uart_console) {
+        xTaskCreatePinnedToCore(canopen_console_task, "serial_console", 4096, NULL, 8, &serial_console_task_handle, tskNO_AFFINITY);
     }
 }
 

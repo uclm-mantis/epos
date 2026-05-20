@@ -6,6 +6,31 @@ menu "EPOS CAN Configuration"
         default "> "
         help
             Prompt used in interactive console to show willingness to receive commands.
+
+    config EPOS_CONSOLE_UART_NUM
+        int "UART port used by the interactive console"
+        default 0
+        range 0 2
+        help
+            UART peripheral used when canopen_console_cfg_t.enable_uart_console is true.
+
+    config EPOS_CONSOLE_UART_TX_PIN
+        int "UART console TX GPIO"
+        default 43
+        help
+            GPIO used as TX for the UART console by default.
+
+    config EPOS_CONSOLE_UART_RX_PIN
+        int "UART console RX GPIO"
+        default 44
+        help
+            GPIO used as RX for the UART console by default.
+
+    config EPOS_CONSOLE_UART_BAUD_RATE
+        int "UART console baud rate"
+        default 115200
+        help
+            Baud rate used by the UART console by default.
     endmenu
 
 endmenu
