@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "esp_err.h"
 
 #if defined __has_include
 #if __has_include("sdkconfig.h")
@@ -65,6 +66,7 @@ typedef struct {
     bool enable_usb_console;
     bool enable_uart_console;
     bool enable_tcp_console;
+    bool start_serial_console;
     int uart_num;
     int uart_tx_pin;
     int uart_rx_pin;
@@ -80,6 +82,7 @@ typedef struct {
     .enable_usb_console = CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED, \
     .enable_uart_console = (!CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED && CONFIG_ESP_CONSOLE_UART), \
     .enable_tcp_console = false, \
+    .start_serial_console = true, \
     .uart_num = CONFIG_EPOS_CONSOLE_UART_NUM, \
     .uart_tx_pin = CONFIG_EPOS_CONSOLE_UART_TX_PIN, \
     .uart_rx_pin = CONFIG_EPOS_CONSOLE_UART_RX_PIN, \
@@ -118,6 +121,8 @@ void print_result_error(const char *msg);
 object_dictionary_entry_t* get_dictionary_entry(const char* sym, const char* datatype);
 void canopen_console_register_commands(void);
 void canopen_console_init(const canopen_console_cfg_t* cfg);
+esp_err_t canopen_console_set_serial_enabled(bool enabled);
+bool canopen_console_is_serial_enabled(void);
 
 // T = Console Type: defines a type that can be used as a parameter in console commands, with printf/scanf format specifiers.
 // A = Console Type Alias: defines an alias for a console type, with a custom printf/scanf format specifier.

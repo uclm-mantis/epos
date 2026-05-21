@@ -34,6 +34,9 @@ static const char *TAG = "cia309";
 static TaskHandle_t serial_console_task_handle;
 static TaskHandle_t tcp_console_task_handle;
 static bool console_dumb_mode;
+static canopen_console_cfg_t serial_console_cfg;
+static bool serial_console_available;
+static bool serial_stdio_configured;
 
 
 /*
@@ -664,7 +667,7 @@ static void completion_callback(const char *buf, linenoiseCompletions *lc)
 void canopen_console_task(void *arg);
 void tcp_console_task(void *arg);
 
-static void configure_usb_serial_jtag_console(const canopen_console_cfg_t *cfg)
+static esp_err_t configure_usb_serial_jtag_console(const canopen_console_cfg_t *cfg)
 {
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED
     fflush(stdout);
@@ -680,18 +683,22 @@ static void configure_usb_serial_jtag_console(const canopen_console_cfg_t *cfg)
         .tx_buffer_size = cfg->tx_buffer_size,
         .rx_buffer_size = cfg->rx_buffer_size,
     };
-    ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&jtag_cfg));
+    esp_err_t err = usb_serial_jtag_driver_install(&jtag_cfg);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        return err;
+    }
     usb_serial_jtag_vfs_use_driver();
 
     setvbuf(stdin, NULL, _IONBF, 0);
+    return ESP_OK;
 #else
     (void)cfg;
     ESP_LOGE(TAG, "USB-JTAG console requires CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED=y");
-    ESP_ERROR_CHECK(ESP_ERR_NOT_SUPPORTED);
+    return ESP_ERR_NOT_SUPPORTED;
 #endif
 }
 
-static void configure_uart_console(const canopen_console_cfg_t *cfg)
+static esp_err_t configure_uart_console(const canopen_console_cfg_t *cfg)
 {
     fflush(stdout);
     fsync(fileno(stdout));
@@ -706,21 +713,27 @@ static void configure_uart_console(const canopen_console_cfg_t *cfg)
         .source_clk = UART_SCLK_DEFAULT,
     };
 
-    ESP_ERROR_CHECK(uart_param_config(uart_num, &uart_config));
-    ESP_ERROR_CHECK(uart_set_pin(uart_num,
-                                 cfg->uart_tx_pin,
-                                 cfg->uart_rx_pin,
-                                 UART_PIN_NO_CHANGE,
-                                 UART_PIN_NO_CHANGE));
+    esp_err_t err = uart_param_config(uart_num, &uart_config);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = uart_set_pin(uart_num,
+                       cfg->uart_tx_pin,
+                       cfg->uart_rx_pin,
+                       UART_PIN_NO_CHANGE,
+                       UART_PIN_NO_CHANGE);
+    if (err != ESP_OK) {
+        return err;
+    }
 
-    esp_err_t err = uart_driver_install(uart_num,
-                                        cfg->rx_buffer_size,
-                                        cfg->tx_buffer_size,
-                                        0,
-                                        NULL,
-                                        0);
-    if (err != ESP_ERR_INVALID_STATE) {
-        ESP_ERROR_CHECK(err);
+    err = uart_driver_install(uart_num,
+                              cfg->rx_buffer_size,
+                              cfg->tx_buffer_size,
+                              0,
+                              NULL,
+                              0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        return err;
     }
 
     uart_vfs_dev_port_set_rx_line_endings(uart_num, ESP_LINE_ENDINGS_CR);
@@ -738,6 +751,7 @@ static void configure_uart_console(const canopen_console_cfg_t *cfg)
              cfg->uart_tx_pin,
              cfg->uart_rx_pin,
              cfg->uart_baud_rate);
+    return ESP_OK;
 }
 
 void canopen_console_init(const canopen_console_cfg_t* cfg)
@@ -751,16 +765,12 @@ void canopen_console_init(const canopen_console_cfg_t* cfg)
     // Inicializar valores de contexto con valores reales del canopen core.
     default_ctx.sdo_timeout = canopen_get_max_delay_ms();
     default_ctx.dump_msg = canopen_is_dump_enabled();
+    serial_console_cfg = *cfg;
+    serial_console_available = cfg->enable_usb_console || cfg->enable_uart_console;
 
     if (cfg->enable_usb_console && cfg->enable_uart_console) {
         ESP_LOGW(TAG, "USB-JTAG and UART console enabled; using UART%d for stdin/stdout.",
                  cfg->uart_num);
-    }
-
-    if (cfg->enable_uart_console) {
-        configure_uart_console(cfg);
-    } else if (cfg->enable_usb_console) {
-        configure_usb_serial_jtag_console(cfg);
     }
 
     esp_console_config_t console_config = {
@@ -791,9 +801,70 @@ void canopen_console_init(const canopen_console_cfg_t* cfg)
         xTaskCreatePinnedToCore(tcp_console_task, "tcp_console", 4096, NULL, 8, &tcp_console_task_handle, tskNO_AFFINITY);
     }
 
-    if (cfg->enable_usb_console || cfg->enable_uart_console) {
-        xTaskCreatePinnedToCore(canopen_console_task, "serial_console", 4096, NULL, 8, &serial_console_task_handle, tskNO_AFFINITY);
+    if (serial_console_available && cfg->start_serial_console) {
+        ESP_ERROR_CHECK(canopen_console_set_serial_enabled(true));
+    } else if (serial_console_available) {
+        ESP_LOGI(TAG, "Serial console configured but not started.");
     }
+}
+
+esp_err_t canopen_console_set_serial_enabled(bool enabled)
+{
+    if (!serial_console_available) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (enabled) {
+        if (serial_console_task_handle != NULL) {
+            return ESP_OK;
+        }
+
+        if (!serial_stdio_configured) {
+            esp_err_t err;
+            if (serial_console_cfg.enable_uart_console) {
+                err = configure_uart_console(&serial_console_cfg);
+            } else if (serial_console_cfg.enable_usb_console) {
+                err = configure_usb_serial_jtag_console(&serial_console_cfg);
+            } else {
+                err = ESP_ERR_INVALID_STATE;
+            }
+            if (err != ESP_OK) {
+                return err;
+            }
+            serial_stdio_configured = true;
+        }
+
+        BaseType_t task_ok = xTaskCreatePinnedToCore(canopen_console_task,
+                                                     "serial_console",
+                                                     4096,
+                                                     NULL,
+                                                     8,
+                                                     &serial_console_task_handle,
+                                                     tskNO_AFFINITY);
+        if (task_ok != pdPASS) {
+            serial_console_task_handle = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+        ESP_LOGI(TAG, "Serial console started.");
+        return ESP_OK;
+    }
+
+    if (serial_console_task_handle != NULL) {
+        TaskHandle_t task = serial_console_task_handle;
+        serial_console_task_handle = NULL;
+        if (task == xTaskGetCurrentTaskHandle()) {
+            vTaskDelete(NULL);
+            return ESP_OK;
+        }
+        vTaskDelete(task);
+        ESP_LOGI(TAG, "Serial console stopped.");
+    }
+    return ESP_OK;
+}
+
+bool canopen_console_is_serial_enabled(void)
+{
+    return serial_console_task_handle != NULL;
 }
 
 
