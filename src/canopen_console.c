@@ -230,7 +230,7 @@ static void read_object(object_dictionary_entry_t* obj)
         return;
     }
     object_value_t value;
-    esp_err_t err = sdo_upload(0x600 + ctx.node, obj->index, obj->subindex, &value);
+    esp_err_t err = sdo_upload(0x600 + ctx.node, obj->index, obj->subindex, &value, obj->type->size);
     if (err == ESP_OK) print_result_value(obj, &value);
     else print_result_error("Unsuccessful SDO upload");
 }

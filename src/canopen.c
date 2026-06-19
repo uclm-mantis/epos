@@ -924,6 +924,11 @@ static void sdo_upload_segment_response(response_t* self, twai_message_t* msg)
     dump_msg("Rx Seg", msg);
     SDO_upload_seq_resp_t* payload = (SDO_upload_seq_resp_t*) msg->data;
     size_t n = 7 - payload->n;
+    if (n > self->size) {
+        canopen_store_result(self, ESP_ERR_INVALID_SIZE);
+        xTaskNotifyGive(self->waiter);
+        return;
+    }
     memcpy(self->value, payload->seg_data, n);
     if (payload->c) {
         xTaskNotifyGive(self->waiter);
@@ -931,7 +936,7 @@ static void sdo_upload_segment_response(response_t* self, twai_message_t* msg)
         twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 1, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
         SDO_upload_seq_req_t* req_payload = (SDO_upload_seq_req_t*) req_msg.data;
         *req_payload = (SDO_upload_seq_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD_SEG, .t = !payload->t, .reserved = {0} };
-        request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .waiter = self->waiter, .result_out = self->result_out };
+        request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .size = self->size - n, .waiter = self->waiter, .result_out = self->result_out };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     }
 }
@@ -942,6 +947,7 @@ static esp_err_t sdo_upload_segment_request(request_t* self)
         .run = sdo_upload_segment_response, 
         .cobid = self->msg.identifier - 0x600 + 0x580, 
         .value = self->value, 
+        .size = self->size,
         .waiter = self->waiter,
         .result_out = self->result_out
     };
@@ -962,16 +968,29 @@ static void sdo_upload_response(response_t* self, twai_message_t* msg)
 {
     dump_msg("Receive", msg);
     SDO_upload_resp_t* payload = (SDO_upload_resp_t*) msg->data;
-    size_t n = 4 - payload->n;
-    if (n > 0)
-        memcpy(self->value, payload->d, 4 - payload->n);
     if (payload->e) {
+        size_t n = 4 - payload->n;
+        if (n != self->size) {
+            canopen_store_result(self, ESP_ERR_INVALID_SIZE);
+            xTaskNotifyGive(self->waiter);
+            return;
+        }
+        if (n > 0) {
+            memcpy(self->value, payload->d, n);
+        }
         xTaskNotifyGive(self->waiter);
     } else {
+        uint32_t transfer_size = 0;
+        memcpy(&transfer_size, payload->d, sizeof(transfer_size));
+        if (transfer_size != self->size) {
+            canopen_store_result(self, ESP_ERR_INVALID_SIZE);
+            xTaskNotifyGive(self->waiter);
+            return;
+        }
         twai_message_t req_msg = { .extd = 0, .rtr = 0, .ss = 1, .self = 0, .dlc_non_comp = 0, .identifier = msg->identifier - 0x580 + 0x600, .data_length_code = 8 };
         SDO_upload_seq_req_t* payload = (SDO_upload_seq_req_t*) req_msg.data;
         *payload = (SDO_upload_seq_req_t){ .x = 0, .ccs = SDO_CCS_UPLOAD_SEG, .t = 0, .reserved = {0} };
-        request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value + n, .waiter = self->waiter, .result_out = self->result_out };
+        request_t req = { .run = sdo_upload_segment_request, .msg = req_msg, .value = self->value, .size = self->size, .waiter = self->waiter, .result_out = self->result_out };
         xQueueSend(tx_task_queue, &req, portMAX_DELAY);
     }
 }
@@ -983,6 +1002,7 @@ static esp_err_t sdo_upload_request(request_t *self)
         .match = match_cobid_only,
         .cobid = self->msg.identifier - 0x600 + 0x580,
         .value = self->value,
+        .size = self->size,
         .waiter = self->waiter,
         .result_out = self->result_out
     };
@@ -1000,7 +1020,7 @@ static esp_err_t sdo_upload_request(request_t *self)
     return canopen_send_now(self);
 }
 
-esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void *ret)
+esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void *ret, size_t size)
 {
     esp_err_t result = ESP_OK;
 
@@ -1030,7 +1050,7 @@ esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void *ret)
         .run = sdo_upload_request,
         .msg = msg,
         .value = ret,
-        .size = 0,
+        .size = size,
         .waiter = waiter,
         .result_out = &result
     };

@@ -101,7 +101,7 @@ static inline esp_err_t nmt_stop_remote_node(uint8_t node)     { return nmt(NMT_
 /* -------------------------------------------------------------------------- */
 
 esp_err_t sdo_download(uint32_t id, uint16_t index, uint8_t subindex, void *value, size_t size);
-esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void *ret);
+esp_err_t sdo_upload(uint32_t id, uint16_t index, uint8_t subindex, void *ret, size_t size);
 
 /* -------------------------------------------------------------------------- */
 /*  PDO client convenience                                                    */

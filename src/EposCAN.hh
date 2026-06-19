@@ -63,7 +63,7 @@ public:
     T upload(uint8_t node, uint16_t index, uint8_t subindex) const {
         static_assert(std::is_trivially_copyable_v<T>, "SDO upload requires trivially copyable type");
         T value{};
-        detail::check(sdo_upload(_base + node, index, subindex, &value));
+        detail::check(sdo_upload(_base + node, index, subindex, &value, sizeof(T)));
         return value;
     }
 

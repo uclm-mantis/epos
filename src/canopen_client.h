@@ -31,7 +31,7 @@ extern "C" {
 #define CANOPEN_CLIENT_DEFINE_GETTER(fn_name, idx, subidx, T) \
     IF_ELSE(IS_NA(fn_name)) \
     ( ) \
-    (esp_err_t fn_name(uint8_t n, T *value) { return sdo_upload(0x600u + n, idx, subidx, value); })
+    (esp_err_t fn_name(uint8_t n, T *value) { return sdo_upload(0x600u + n, idx, subidx, value, sizeof(T)); })
 
 #define CANOPEN_CLIENT_DEFINE_SETTER(fn_name, idx, subidx, T) \
     IF_ELSE(IS_NA(fn_name)) \
