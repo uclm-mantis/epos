@@ -103,6 +103,13 @@ static void canopen_store_result(request_t *self, esp_err_t err)
     }
 }
 
+static void canopen_store_response_result(response_t *self, esp_err_t err)
+{
+    if (self != NULL && self->result_out != NULL) {
+        *self->result_out = err;
+    }
+}
+
 static const char *canopen_twai_state_str(twai_state_t state)
 {
     switch (state) {
@@ -925,7 +932,7 @@ static void sdo_upload_segment_response(response_t* self, twai_message_t* msg)
     SDO_upload_seq_resp_t* payload = (SDO_upload_seq_resp_t*) msg->data;
     size_t n = 7 - payload->n;
     if (n > self->size) {
-        canopen_store_result(self, ESP_ERR_INVALID_SIZE);
+        canopen_store_response_result(self, ESP_ERR_INVALID_SIZE);
         xTaskNotifyGive(self->waiter);
         return;
     }
@@ -971,7 +978,7 @@ static void sdo_upload_response(response_t* self, twai_message_t* msg)
     if (payload->e) {
         size_t n = 4 - payload->n;
         if (n != self->size) {
-            canopen_store_result(self, ESP_ERR_INVALID_SIZE);
+            canopen_store_response_result(self, ESP_ERR_INVALID_SIZE);
             xTaskNotifyGive(self->waiter);
             return;
         }
@@ -983,7 +990,7 @@ static void sdo_upload_response(response_t* self, twai_message_t* msg)
         uint32_t transfer_size = 0;
         memcpy(&transfer_size, payload->d, sizeof(transfer_size));
         if (transfer_size != self->size) {
-            canopen_store_result(self, ESP_ERR_INVALID_SIZE);
+            canopen_store_response_result(self, ESP_ERR_INVALID_SIZE);
             xTaskNotifyGive(self->waiter);
             return;
         }
