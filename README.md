@@ -805,7 +805,7 @@ const size_t epos2_server_od_len = sizeof(epos2_server_od) / sizeof(epos2_server
 
 This project was originally funded by EU (Erasmus+ 2022-1-ES01- KA220-HED-000089155), JCCM and FEDER (SBPLY/21/180501/000238) and by NATO (SPS.MYP.G6001) research grants.
 
-Adaptations to provide server-side implementation and ROS2 compatibility is funded by grant reference "2024-TRAN-36595" and by the European Regional Development Fund (ERDF).
+Adaptations to provide server-side implementation and ROS2 compatibility is also funded by grant reference "2024-TRAN-36595" and by the European Regional Development Fund (ERDF).
 
 Developed by UCLM [Mantis Research Group](https://uclm-mantis.github.io/). 
 
